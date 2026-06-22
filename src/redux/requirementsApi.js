@@ -1,5 +1,5 @@
 import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react';
-imepoer
+
 export const requirementsApi = createApi({
   reducerPath: 'requirementsApi',
   baseQuery: fetchBaseQuery({ baseUrl: process.env.BASE_URL || 'http://localhost:3000/api' }),
