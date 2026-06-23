@@ -2,10 +2,10 @@ import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react';
 
 export const requirementsApi = createApi({
   reducerPath: 'requirementsApi',
-  baseQuery: fetchBaseQuery({ baseUrl: process.env.BASE_URL || 'http://localhost:3000/api' }),
+  baseQuery: fetchBaseQuery({ baseUrl: 'http://54.85.156.150:3000/api' }),
   tagTypes: ['Requirement'], // 1. Main tag registration
   
-  
+
   endpoints: (builder) => ({
     // 1. Get all requirements
     getRequirements: builder.query({
