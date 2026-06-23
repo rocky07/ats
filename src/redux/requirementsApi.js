@@ -5,6 +5,7 @@ export const requirementsApi = createApi({
   baseQuery: fetchBaseQuery({ baseUrl: process.env.BASE_URL || 'http://localhost:3000/api' }),
   tagTypes: ['Requirement'], // 1. Main tag registration
   
+  
   endpoints: (builder) => ({
     // 1. Get all requirements
     getRequirements: builder.query({
