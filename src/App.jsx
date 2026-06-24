@@ -5,8 +5,9 @@ import {
   Avatar, 
   Dropdown, 
   Space, 
-  Typography, 
-  Button
+  Typography,
+  Button,
+  Modal
 } from 'antd';
 import {
   DashboardOutlined,
@@ -14,12 +15,15 @@ import {
   SettingOutlined,
   LogoutOutlined,
   AppstoreOutlined,
-  ArrowUpOutlined
+  ArrowUpOutlined,
+  MenuFoldOutlined,
+  MenuUnfoldOutlined
 } from '@ant-design/icons';
 import Dashboard from './components/Dashboard';
 import Candidates from './components/Candidates';
 import Requirements from './components/Requirements';
 import Pipeline from './components/Pipeline';
+import Settings from './components/Settings';
 
 const { Header, Sider, Content } = Layout;
 const { Title } = Typography;
@@ -27,6 +31,7 @@ const { Title } = Typography;
 const App = () => {
   const [collapsed, setCollapsed] = useState(false);
   const [selectedMenu, setSelectedMenu] = useState('1');
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const menuTitles = {
     '1': 'Dashboard',
@@ -78,25 +83,37 @@ const App = () => {
   return (
     <Layout style={{ minHeight: '100vh', display: 'flex', flexDirection: 'row' }}>
       {/* --- Left Sidebar --- */}
-      <Sider 
-        collapsible 
-        collapsed={collapsed} 
+      <Sider
+        collapsible
+        collapsed={collapsed}
         onCollapse={(value) => setCollapsed(value)}
+        trigger={null}
         theme="dark"
         width={220}
       >
         {/* Top Left Corner: Logo Area */}
-        <div style={{ 
-          height: 64, 
-          display: 'flex', 
-          alignItems: 'center', 
-          justifyContent: 'center',
+        <div style={{
+          height: 64,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: collapsed ? 'center' : 'space-between',
           padding: '0 16px',
           borderBottom: '1px solid rgba(255, 255, 255, 0.1)'
         }}>
-          <Title level={3} style={{ color: '#fff', margin: 0, whiteSpace: 'nowrap' }}>
-            {collapsed ? 'ATS' : 'ATS Dashboard'}
-          </Title>
+          {!collapsed && (
+            <Title level={3} style={{ color: '#fff', margin: 0, whiteSpace: 'nowrap' }}>
+              Bourntec ATS
+            </Title>
+          )}
+          <Button
+            type="text"
+            onClick={() => setCollapsed(!collapsed)}
+            icon={
+              collapsed
+                ? <MenuUnfoldOutlined style={{ color: '#fff', fontSize: 18 }} />
+                : <MenuFoldOutlined style={{ color: '#fff', fontSize: 18 }} />
+            }
+          />
         </div>
 
         <Menu 
@@ -108,6 +125,19 @@ const App = () => {
           style={{ marginTop: 16 }}
         />
       </Sider>
+
+      {/* --- Settings Popup --- */}
+      <Modal
+        open={settingsOpen}
+        onCancel={() => setSettingsOpen(false)}
+        footer={null}
+        width={840}
+        destroyOnClose
+        title="Settings"
+        styles={{ body: { maxHeight: '75vh', overflowY: 'auto' } }}
+      >
+        <Settings />
+      </Modal>
 
       {/* --- Right side Viewport Wrapper --- */}
       <Layout style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
@@ -130,7 +160,7 @@ const App = () => {
            
           {/* Strictly Anchored to Top Right corner */}
           <Space size="middle" style={{ display: 'flex', alignItems: 'center' }}>
-            <Button type="text" icon={<SettingOutlined style={{ fontSize: 18 }} />} />
+            <Button type="text" onClick={() => setSettingsOpen(true)} icon={<SettingOutlined style={{ fontSize: 18 }} />} />
             <Dropdown menu={{ items: userMenuItems }} placement="bottomRight" arrow>
               <Space style={{ cursor: 'pointer' }}>
                 <Avatar style={{ backgroundColor: '#1890ff' }} icon={<UserOutlined />} size="large" />

@@ -2,9 +2,8 @@ import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react';
 
 export const requirementsApi = createApi({
   reducerPath: 'requirementsApi',
-  baseQuery: fetchBaseQuery({ baseUrl: 'http://54.85.156.150:3000/api' }),
+  baseQuery: fetchBaseQuery({ baseUrl: 'http://localhost:3000/api' }),
   tagTypes: ['Requirement'], // 1. Main tag registration
-  
 
   endpoints: (builder) => ({
     // 1. Get all requirements
@@ -12,7 +11,18 @@ export const requirementsApi = createApi({
       query: () => '/requirements',
       providesTags: ['Requirement'], // 2. Attaches the tag to the fetched list cache
     }),
-
+    getRequirementDetails: builder.query({
+      query: (requirementId) => `/requirements/${requirementId}`,
+      providesTags: ['Requirement'], // 2. Attaches the tag to the fetched list cache
+    }),
+    updateRequirement: builder.mutation({
+      query: ({ requirementId, updatedRequirement }) => ({
+        url: `/requirements/${requirementId}`,
+        method: 'PUT',
+        body: updatedRequirement,
+      }),
+      invalidatesTags: ['Requirement'], // Invalidate the 'Requirement' tag to refetch the list after editing
+    }),
     // 2. Mutation: Create a new requirement
     addRequirement: builder.mutation({
       query: (newRequirement) => ({
@@ -21,9 +31,17 @@ export const requirementsApi = createApi({
         body: newRequirement,
       }),
       // 3. FIXED: Moved inside the mutation object and changed 'Requirements' to 'Requirement'
-      invalidatesTags: ['Requirement'], 
+      invalidatesTags: ['Requirement'],
     }),
+    deleteRequirement: builder.mutation({
+      query: (requirementId) => ({
+        url: `/requirements/${requirementId}`,
+        method: 'DELETE',
+      }),
+      invalidatesTags: ['Requirement'], // Invalidate the 'Requirement' tag to refetch the list after deletion
+    }),
+
   }),
 });
 
-export const { useGetRequirementsQuery, useAddRequirementMutation } = requirementsApi;
+export const { useGetRequirementsQuery, useGetRequirementDetailsQuery, useAddRequirementMutation, useUpdateRequirementMutation, useDeleteRequirementMutation } = requirementsApi;

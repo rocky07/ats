@@ -1,0 +1,58 @@
+{
+  "email": {
+    "enabled": true,
+    "smtpHost": "smtp.company.com",
+    "smtpPort": 587,
+    "fromAddress": "hr@company.com",
+    "replyTo": "no-reply@company.com",
+    "useTLS": true,
+    "templates": {
+      "interviewInvite": true,
+      "offerLetter": true,
+      "rejection": true,
+      "applicationConfirmation": true
+    }
+  },
+  "jobBoards": {
+    "linkedin": {
+      "enabled": true,
+      "apiToken": "ln_api_xxxxxxxxxxxxxxxx",
+      "autoPost": true,
+      "syncInterval": 60
+    },
+    "naukri": {
+      "enabled": true,
+      "apiToken": "nk_api_xxxxxxxxxxxxxxxx",
+      "autoPost": false,
+      "syncInterval": 120
+    },
+    "monster": {
+      "enabled": false,
+      "apiToken": "",
+      "autoPost": false,
+      "syncInterval": 180
+    },
+    "indeed": {
+      "enabled": false,
+      "apiToken": "",
+      "autoPost": false,
+      "syncInterval": 120
+    }
+  },
+  "aiSettings": {
+    "tokenLimit": 4096,
+    "model": "claude-sonnet-4-6",
+    "temperature": 0.7,
+    "enableResumeScreening": true,
+    "enableJdGeneration": true,
+    "enableCandidateSummary": true
+  },
+  "general": {
+    "timezone": "Asia/Kolkata",
+    "dateFormat": "DD/MM/YYYY",
+    "language": "en",
+    "sessionTimeout": 30,
+    "maxUploadSizeMB": 10,
+    "allowedFileTypes": ["pdf", "doc", "docx"]
+  }
+}
