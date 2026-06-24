@@ -16,23 +16,50 @@ import {
   Progress,
   Badge,
   Slider,
-  Tooltip
+  Tooltip,
+  Upload,
+  Tag,
+  List,
+  Divider,
+  Empty,
+  Avatar,
+  Segmented,
+  Table
 } from 'antd';
-import { 
-  FireOutlined, 
-  WarningOutlined, 
-  DashboardOutlined, 
-  InfoCircleOutlined, 
+import {
+  FireOutlined,
+  WarningOutlined,
+  DashboardOutlined,
+  InfoCircleOutlined,
   BulbOutlined,
   SyncOutlined,
-  ThunderboltOutlined
+  ThunderboltOutlined,
+  EyeOutlined,
+  InboxOutlined,
+  UserOutlined,
+  AppstoreOutlined,
+  TableOutlined
 } from '@ant-design/icons';
 import { SearchOutlined, PlusOutlined } from '@ant-design/icons';
 
 const { Title, Text } = Typography;
 const { TextArea } = Input;
 
-const Requirements = () => {
+// Mock candidate database (would come from an API in production)
+const CANDIDATE_DB = [
+  { id: 101, name: 'Maria Lopez', email: 'maria.lopez@example.com', skills: ['Node.js', 'AWS'] },
+  { id: 102, name: 'Aiden Clark', email: 'aiden.clark@example.com', skills: ['React', 'TypeScript'] },
+  { id: 103, name: 'Priya Nair', email: 'priya.nair@example.com', skills: ['Node.js', 'Kafka'] },
+  { id: 104, name: 'Lucas Meyer', email: 'lucas.meyer@example.com', skills: ['Vue', 'Docker'] },
+  { id: 105, name: 'Sara Khan', email: 'sara.khan@example.com', skills: ['Python', 'AWS'] },
+  { id: 106, name: 'David Okoro', email: 'david.okoro@example.com', skills: ['Go', 'Kubernetes'] },
+];
+
+// Pipeline stage display metadata
+const STAGE_LABELS = { ingested: 'Ingested', ranked: 'Ranked', l1: 'L1 (Exam)', l2: 'L2 (Recruiter)', l3: 'L3 (Final)' };
+const STAGE_COLORS = { ingested: 'blue', ranked: 'gold', l1: 'purple', l2: 'cyan', l3: 'green' };
+
+const Requirements = ({ onViewPipeline }) => {
   // State management for Modal visibility and submitting loader
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -51,6 +78,74 @@ const Requirements = () => {
   });
 
   const [isGenerating, setIsGenerating] = useState(false);
+
+  // --- Layout & filtering ---
+  const [viewMode, setViewMode] = useState('card'); // 'card' | 'table'
+  const [showAllReqs, setShowAllReqs] = useState(false); // default: open requirements only
+
+  // A requirement is open unless its isClosed flag is true
+  const isOpenRequirement = (req) => !req.isClosed;
+  const visibleRequirements = (requirements ?? []).filter(
+    (req) => showAllReqs || isOpenRequirement(req)
+  );
+
+  // --- View Details modal: applicants & pipeline state ---
+  const [viewReq, setViewReq] = useState(null);
+  const [applicantsByReq, setApplicantsByReq] = useState({});
+  const [addPick, setAddPick] = useState(null);
+
+  const applicants = viewReq ? (applicantsByReq[viewReq.id] ?? []) : [];
+
+  const handleView = (req) => {
+    // Seed mock applicants the first time a requirement is opened
+    setApplicantsByReq((prev) =>
+      prev[req.id]
+        ? prev
+        : {
+            ...prev,
+            [req.id]: [
+              { id: 1, name: 'Janon Belha', email: 'janon.belha@example.com', stage: 'l1' },
+              { id: 2, name: 'Maria Lopez', email: 'maria.lopez@example.com', stage: 'ranked' },
+              { id: 3, name: 'Aiden Clark', email: 'aiden.clark@example.com', stage: 'ingested' },
+            ],
+          }
+    );
+    setViewReq(req);
+  };
+
+  // Add a candidate from the database into the Ingested stage
+  const handleAddFromDb = (candidateId) => {
+    const cand = CANDIDATE_DB.find((c) => c.id === candidateId);
+    if (!cand || !viewReq) return;
+    setApplicantsByReq((prev) => {
+      const list = prev[viewReq.id] ?? [];
+      if (list.some((c) => c.id === cand.id)) {
+        message.info(`${cand.name} is already in this pipeline`);
+        return prev;
+      }
+      message.success(`${cand.name} added to pipeline (Ingested)`);
+      return { ...prev, [viewReq.id]: [...list, { id: cand.id, name: cand.name, email: cand.email, stage: 'ingested' }] };
+    });
+    setAddPick(null);
+  };
+
+  // Handle a dropped/uploaded resume — creates a candidate in the Ingested stage
+  const handleResumeUpload = (file) => {
+    if (!viewReq) return false;
+    const derivedName = file.name.replace(/\.(pdf|docx?|txt)$/i, '').replace(/[_-]+/g, ' ').trim();
+    const newCand = {
+      id: `r-${Date.now()}-${Math.round(Math.random() * 1000)}`,
+      name: derivedName || 'New Candidate',
+      email: 'pending — parsing resume',
+      stage: 'ingested',
+    };
+    setApplicantsByReq((prev) => ({
+      ...prev,
+      [viewReq.id]: [...(prev[viewReq.id] ?? []), newCand],
+    }));
+    message.success(`${file.name} uploaded — candidate added to Ingested`);
+    return false; // prevent antd from actually uploading
+  };
 
   // Simulated AI Generation Function
   const handleAIFill = async () => {
@@ -102,25 +197,48 @@ const Requirements = () => {
   return (
     <>
       {/* Top Search Controls Frame */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-        <Input 
-          placeholder="Search requirements" 
-          style={{ width: 400, borderRadius: 4 }} 
-          prefix={<SearchOutlined />}
-        />
-        <Button 
-          type="primary" 
-          icon={<PlusOutlined />}
-          style={{ backgroundColor: '#2563eb', height: 40, paddingInline: 24 }}
-          onClick={showModal}
-        >
-          New Requirement
-        </Button>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, gap: 12, flexWrap: 'wrap' }}>
+        <Space size={12}>
+          <Input
+            placeholder="Search requirements"
+            style={{ width: 320, borderRadius: 4 }}
+            prefix={<SearchOutlined />}
+          />
+          <Tooltip title="Show open requirements only, or all (including closed)">
+            <Segmented
+              value={showAllReqs ? 'all' : 'open'}
+              onChange={(val) => setShowAllReqs(val === 'all')}
+              options={[
+                { label: 'Open', value: 'open' },
+                { label: 'All', value: 'all' },
+              ]}
+            />
+          </Tooltip>
+        </Space>
+        <Space size={12}>
+          <Segmented
+            value={viewMode}
+            onChange={setViewMode}
+            options={[
+              { value: 'card', icon: <AppstoreOutlined /> },
+              { value: 'table', icon: <TableOutlined /> },
+            ]}
+          />
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            style={{ backgroundColor: '#2563eb', height: 40, paddingInline: 24 }}
+            onClick={showModal}
+          >
+            New Requirement
+          </Button>
+        </Space>
       </div>
 
       {/* Grid displaying current requirements */}
+      {viewMode === 'card' ? (
       <Row gutter={[16, 16]}>
-        {requirements?.map((req) => (
+        {visibleRequirements.map((req) => (
           <Col xs={24} sm={12} lg={6} key={req.id}>
             <Card bordered={true} style={{ background: '#fff', borderRadius: 8 }}>
               <Title level={4} style={{ margin: '0 0 12px 0' }}>{req.title}</Title>
@@ -135,17 +253,20 @@ const Requirements = () => {
                 <div><strong>Must-haves:</strong> [Node.js, React, ...]</div>
                 <div><strong>Nice-to-haves:</strong> [AWS, Docker, ...]</div>
               </div>
-              <Button 
-                type="primary" 
-                block 
+              <Button
+                type="primary"
+                block
+                icon={<EyeOutlined />}
+                onClick={() => handleView(req)}
                 style={{ backgroundColor: '#2563eb', marginTop: 12, marginBottom: 8, height: 40 }}
               >
-                Rank Ingested Candidates
+                View Details
               </Button>
               <Row gutter={8}>
                 <Col xs={16}>
-                  <Button 
-                    block 
+                  <Button
+                    block
+                    onClick={() => onViewPipeline?.(req.id)}
                     style={{ borderColor: '#000', color: '#000', border: '1px solid #000', height: 40, background: 'transparent' }}
                   >
                     View Pipeline
@@ -163,6 +284,127 @@ const Requirements = () => {
           </Col>
         ))}
       </Row>
+      ) : (
+        <Table
+          rowKey="id"
+          dataSource={visibleRequirements}
+          loading={isLoading || isFetching}
+          pagination={{ pageSize: 10, showSizeChanger: true }}
+          columns={[
+            { title: 'Title', dataIndex: 'title', sorter: (a, b) => String(a.title).localeCompare(String(b.title)) },
+            { title: 'Department', dataIndex: 'department' },
+            { title: 'Open Date', dataIndex: 'openDate' },
+            {
+              title: 'Status',
+              key: 'status',
+              render: (_, req) =>
+                isOpenRequirement(req)
+                  ? <Tag color="green">Open</Tag>
+                  : <Tag color="red">Closed</Tag>,
+            },
+            {
+              title: 'Actions',
+              key: 'actions',
+              render: (_, req) => (
+                <Space>
+                  <Button size="small" type="primary" icon={<EyeOutlined />} onClick={() => handleView(req)} style={{ backgroundColor: '#2563eb' }}>
+                    View Details
+                  </Button>
+                  <Button size="small" onClick={() => onViewPipeline?.(req.id)}>
+                    View Pipeline
+                  </Button>
+                </Space>
+              ),
+            },
+          ]}
+        />
+      )}
+
+      {/* --- View Details Modal: job details + applicants + add to pipeline --- */}
+      <Modal
+        title={viewReq ? <Title level={4} style={{ margin: 0 }}>{viewReq.title}</Title> : null}
+        open={!!viewReq}
+        onCancel={() => setViewReq(null)}
+        footer={<Button onClick={() => setViewReq(null)}>Close</Button>}
+        width={820}
+        destroyOnClose
+        styles={{ body: { maxHeight: '72vh', overflowY: 'auto' } }}
+      >
+        {viewReq && (
+          <>
+            {/* Job requirement details */}
+            <Card size="small" style={{ marginBottom: 20, background: '#fafafa' }}>
+              <Row gutter={[16, 8]} style={{ fontSize: 13 }}>
+                <Col span={12}><Text strong>Department:</Text> {viewReq.department}</Col>
+                <Col span={12}><Text strong>Open Date:</Text> {viewReq.openDate}</Col>
+              </Row>
+              <Divider style={{ margin: '12px 0' }} />
+              <div style={{ fontSize: 13, marginBottom: 8 }}>
+                <Text strong>Description:</Text> Lorem ipsum dolor sit amet, consectetuer donec commos sec. alicd oulsmef, simuntatus...
+              </div>
+              <div style={{ fontSize: 13 }}><Text strong>Must-haves:</Text> [Node.js, React, ...]</div>
+              <div style={{ fontSize: 13 }}><Text strong>Nice-to-haves:</Text> [AWS, Docker, ...]</div>
+            </Card>
+
+            {/* Applicants and their pipeline status */}
+            <Title level={5} style={{ marginTop: 0 }}>Applicants & Pipeline Status ({applicants.length})</Title>
+            {applicants.length === 0 ? (
+              <Empty description="No applicants yet" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+            ) : (
+              <List
+                size="small"
+                dataSource={applicants}
+                renderItem={(c) => (
+                  <List.Item actions={[<Tag color={STAGE_COLORS[c.stage]} key="stage">{STAGE_LABELS[c.stage]}</Tag>]}>
+                    <List.Item.Meta
+                      avatar={<Avatar icon={<UserOutlined />} style={{ backgroundColor: '#1890ff' }} />}
+                      title={c.name}
+                      description={<span style={{ fontSize: 12 }}>{c.email}</span>}
+                    />
+                  </List.Item>
+                )}
+              />
+            )}
+
+            <Divider />
+
+            {/* Add candidate from database */}
+            <Title level={5}>Add Candidate to Pipeline</Title>
+            <Space.Compact style={{ width: '100%', marginBottom: 16 }}>
+              <Select
+                showSearch
+                placeholder="Select a candidate from the database"
+                value={addPick}
+                onChange={setAddPick}
+                optionFilterProp="label"
+                style={{ flex: 1 }}
+                options={CANDIDATE_DB.map((c) => ({ value: c.id, label: `${c.name} — ${c.skills.join(', ')}` }))}
+              />
+              <Button
+                type="primary"
+                icon={<PlusOutlined />}
+                disabled={!addPick}
+                onClick={() => handleAddFromDb(addPick)}
+                style={{ backgroundColor: '#2563eb' }}
+              >
+                Add
+              </Button>
+            </Space.Compact>
+
+            {/* Upload / drag-and-drop resume directly into the pipeline */}
+            <Upload.Dragger
+              multiple
+              showUploadList={false}
+              accept=".pdf,.doc,.docx"
+              beforeUpload={handleResumeUpload}
+            >
+              <p className="ant-upload-drag-icon"><InboxOutlined /></p>
+              <p className="ant-upload-text">Click or drag resume(s) here to add directly to the pipeline</p>
+              <p className="ant-upload-hint">PDF, DOC, DOCX — each upload creates a candidate in the Ingested stage</p>
+            </Upload.Dragger>
+          </>
+        )}
+      </Modal>
 
       {/* --- New Requirement Data Intake Modal Form --- */}
       <Modal

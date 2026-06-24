@@ -7,7 +7,8 @@ import {
   Space, 
   Typography,
   Button,
-  Modal
+  Modal,
+  Select
 } from 'antd';
 import {
   DashboardOutlined,
@@ -17,7 +18,8 @@ import {
   AppstoreOutlined,
   ArrowUpOutlined,
   MenuFoldOutlined,
-  MenuUnfoldOutlined
+  MenuUnfoldOutlined,
+  GlobalOutlined
 } from '@ant-design/icons';
 import Dashboard from './components/Dashboard';
 import Candidates from './components/Candidates';
@@ -32,6 +34,21 @@ const App = () => {
   const [collapsed, setCollapsed] = useState(false);
   const [selectedMenu, setSelectedMenu] = useState('1');
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [region, setRegion] = useState('global');
+  const [pipelineReqId, setPipelineReqId] = useState(null);
+
+  // Navigate to the Pipelines tab and preselect the given requirement
+  const handleViewPipeline = (reqId) => {
+    setPipelineReqId(reqId);
+    setSelectedMenu('4');
+  };
+
+  const regionOptions = [
+    { value: 'global', label: 'Global' },
+    { value: 'india', label: 'India' },
+    { value: 'middleeast', label: 'Middle East' },
+    { value: 'us', label: 'US' },
+  ];
 
   const menuTitles = {
     '1': 'Dashboard',
@@ -116,10 +133,10 @@ const App = () => {
           />
         </div>
 
-        <Menu 
-          theme="dark" 
-          defaultSelectedKeys={['1']} 
-          mode="inline" 
+        <Menu
+          theme="dark"
+          selectedKeys={[selectedMenu]}
+          mode="inline"
           items={sidebarItems}
           onClick={(e) => setSelectedMenu(e.key)}
           style={{ marginTop: 16 }}
@@ -160,6 +177,14 @@ const App = () => {
            
           {/* Strictly Anchored to Top Right corner */}
           <Space size="middle" style={{ display: 'flex', alignItems: 'center' }}>
+            <Select
+              value={region}
+              onChange={setRegion}
+              options={regionOptions}
+              suffixIcon={<GlobalOutlined />}
+              style={{ minWidth: 140 }}
+              aria-label="Operating region"
+            />
             <Button type="text" onClick={() => setSettingsOpen(true)} icon={<SettingOutlined style={{ fontSize: 18 }} />} />
             <Dropdown menu={{ items: userMenuItems }} placement="bottomRight" arrow>
               <Space style={{ cursor: 'pointer' }}>
@@ -176,13 +201,13 @@ const App = () => {
           {selectedMenu === '1' && <Dashboard />}
 
           {/* Requirements */}
-          {selectedMenu === '3' && <Requirements />}
+          {selectedMenu === '3' && <Requirements onViewPipeline={handleViewPipeline} />}
 
           {/* Candidates */}
           {selectedMenu === '2' && <Candidates />}
 
           {/* Pipelines */}
-          {selectedMenu === '4' && <Pipeline />}
+          {selectedMenu === '4' && <Pipeline reqId={pipelineReqId} />}
         </Content>
 
       </Layout>

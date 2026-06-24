@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Button, Card, Typography, Select, Drawer, Input, Empty, message, Dropdown, Modal, Radio, Space, Tooltip, Segmented } from 'antd';
-import { PlusOutlined, TeamOutlined, SearchOutlined, DownOutlined, FileAddOutlined, EyeOutlined, EditOutlined, DeleteOutlined, ShareAltOutlined, CopyOutlined } from '@ant-design/icons';
+import { PlusOutlined, TeamOutlined, SearchOutlined, DownOutlined, FileAddOutlined, EyeOutlined, EditOutlined, DeleteOutlined, ShareAltOutlined, CopyOutlined, CompressOutlined } from '@ant-design/icons';
 import { useGetRequirementsQuery } from '../redux/requirementsApi';
 
 const { Title, Text } = Typography;
@@ -46,10 +46,16 @@ const CANDIDATE_DB = [
   { id: 108, name: 'Tom Becker', email: 'tom.becker@example.com', skills: ['Node.js', 'GraphQL'] },
 ];
 
-const Pipeline = () => {
+const Pipeline = ({ reqId = null }) => {
   const { data: requirements, isLoading } = useGetRequirementsQuery();
-  const [selectedReqId, setSelectedReqId] = useState(null);
+  const [selectedReqId, setSelectedReqId] = useState(reqId);
   const [showAllPostings, setShowAllPostings] = useState(false); // default: open postings only
+  const [compact, setCompact] = useState(false); // compact card view for long lists
+
+  // Preselect the requirement when navigated here from "View Pipeline"
+  useEffect(() => {
+    if (reqId != null) setSelectedReqId(reqId);
+  }, [reqId]);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [examModalOpen, setExamModalOpen] = useState(false);
@@ -183,10 +189,10 @@ const Pipeline = () => {
     { key: 'delete', icon: <DeleteOutlined />, label: 'Delete', danger: true },
   ];
 
-  // A posting is treated as open unless its status is explicitly "closed"
-  const isOpenPosting = (req) => String(req.status ?? 'open').toLowerCase() !== 'closed';
+  // A posting is treated as open unless its isClosed flag is true
+  const isOpenPosting = (req) => !req.isClosed;
   const visibleRequirements = (requirements ?? []).filter(
-    (req) => showAllPostings || isOpenPosting(req)
+    (req) => showAllPostings || isOpenPosting(req) || req.id === selectedReqId
   );
 
   const filteredDb = CANDIDATE_DB.filter((c) => {
@@ -234,6 +240,7 @@ const Pipeline = () => {
               </Space>
             </Button>
           </Dropdown>
+          
           <Button
             icon={<TeamOutlined />}
             onClick={() => setDrawerOpen(true)}
@@ -246,8 +253,16 @@ const Pipeline = () => {
           </Button>
         </div>
       </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16, minHeight: 600 }}>
+<Tooltip title="Toggle compact cards to fit more candidates per column">
+            <Button
+              icon={<CompressOutlined />}
+              type={compact ? 'primary' : 'default'}
+              onClick={() => setCompact((v) => !v)}
+              style={{ height: 40, paddingInline: 20, ...(compact ? { backgroundColor: '#2563eb' } : {}) }}
+            >
+            </Button>
+          </Tooltip>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16, minHeight: compact ? 'auto' : 600, alignItems: 'start' }}>
         {[
           { key: 'ingested', label: 'Ingested (Claude Parsed)' },
           { key: 'ranked', label: 'Ranked (Claude Scored)' },
@@ -255,54 +270,65 @@ const Pipeline = () => {
           { key: 'l2', label: 'L2 (Recruiter)' },
           { key: 'l3', label: 'L3 (Final)' }
         ].map((stage) => (
-          <div 
-            key={stage.key} 
-            style={{ 
-              background: '#f5f5f5', 
-              borderRadius: 8, 
+          <div
+            key={stage.key}
+            style={{
+              background: '#f5f5f5',
+              borderRadius: 8,
               padding: 12,
-              minHeight: 400,
+              minHeight: compact ? 120 : 400,
               border: draggedCandidate?.sourceStage !== stage.key ? '2px solid transparent' : '2px dashed #2563eb'
             }}
             onDragOver={handleDragOver}
             onDrop={(e) => handleDrop(e, stage.key)}
           >
-            <Title level={5} style={{ marginBottom: 16, fontSize: 12, fontWeight: 600 }}>
+            <Title level={5} style={{ marginBottom: compact ? 10 : 16, fontSize: 12, fontWeight: 600 }}>
               {stage.label}
               <div style={{ fontSize: 11, color: '#666', fontWeight: 400 }}>
                 {pipelineData[stage.key]?.length || 0} Candidates
               </div>
             </Title>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: compact ? 6 : 12 }}>
               {pipelineData[stage.key]?.map((candidate) => (
-                <Card 
-                  key={candidate.id} 
-                  style={{ 
-                    background: '#fff', 
+                <Card
+                  key={candidate.id}
+                  style={{
+                    background: '#fff',
                     cursor: 'grab',
-                    padding: 12,
                     border: '1px solid #e5e7eb',
                     borderRadius: 6,
                     opacity: draggedCandidate?.candidate.id === candidate.id ? 0.5 : 1
                   }}
+                  styles={{ body: { padding: compact ? '6px 10px' : 12 } }}
                   hoverable
                   draggable
                   onDragStart={(e) => handleDragStart(e, candidate, stage.key)}
                 >
-                  <div style={{ fontSize: 12 }}>
-                    <Text strong>{candidate.name}</Text>
-                    <div style={{ fontSize: 11, color: '#666', marginTop: 4 }}>
-                      EMAIL: {candidate.email}
+                  {compact ? (
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, fontSize: 12 }}>
+                      <Text strong ellipsis style={{ flex: 1 }}>{candidate.name}</Text>
+                      {candidate.score && (
+                        <span style={{ padding: '1px 6px', backgroundColor: '#dbeafe', borderRadius: 4, fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap' }}>
+                          {candidate.score}
+                        </span>
+                      )}
                     </div>
-                    <div style={{ fontSize: 11, color: '#666', marginTop: 2 }}>
-                      SKILLS: {candidate.skills.join(', ')}
-                    </div>
-                    {candidate.score && (
-                      <div style={{ marginTop: 8, padding: 8, backgroundColor: '#dbeafe', borderRadius: 4, fontSize: 11, fontWeight: 600 }}>
-                        RANK SCORE: {candidate.score}-100
+                  ) : (
+                    <div style={{ fontSize: 12 }}>
+                      <Text strong>{candidate.name}</Text>
+                      <div style={{ fontSize: 11, color: '#666', marginTop: 4 }}>
+                        EMAIL: {candidate.email}
                       </div>
-                    )}
-                  </div>
+                      <div style={{ fontSize: 11, color: '#666', marginTop: 2 }}>
+                        SKILLS: {candidate.skills.join(', ')}
+                      </div>
+                      {candidate.score && (
+                        <div style={{ marginTop: 8, padding: 8, backgroundColor: '#dbeafe', borderRadius: 4, fontSize: 11, fontWeight: 600 }}>
+                          RANK SCORE: {candidate.score}-100
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </Card>
               ))}
               {pipelineData[stage.key]?.length === 0 && (
