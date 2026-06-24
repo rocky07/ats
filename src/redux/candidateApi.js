@@ -5,6 +5,7 @@ export const candidateApi = createApi({
   baseQuery: fetchBaseQuery({ baseUrl: API_BASE_URL }),
   tagTypes: ['Candidates'], // 1. Main tag registration
   
+  
 
   endpoints: (builder) => ({
     // 1. Get all candidates
