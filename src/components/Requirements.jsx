@@ -1,5 +1,24 @@
 import React, { useState } from 'react';
 import { useGetRequirementsQuery,useAddRequirementMutation} from '../redux/requirementsApi';
+import { useUploadResumeMutation } from '../redux/candidateApi';
+import { useLazyGetPipelineStagesQuery, useSavePipelineStagesMutation } from '../redux/pipelineStagesApi';
+import { useGetMarketIntelligenceMutation, useGenerateJobSummaryMutation } from '../redux/intelligenceApi';
+
+// The fixed pipeline stages, in order.
+const STAGE_KEYS = ['ingested', 'ranked', 'l1', 'l2', 'l3'];
+
+// Flatten the backend stages object into a flat applicant list (with a stage field).
+const stagesToApplicants = (stages = {}) =>
+  STAGE_KEYS.flatMap((stage) => (stages[stage] ?? []).map((c) => ({ ...c, stage })));
+
+// Rebuild the stages object from a flat applicant list.
+const applicantsToStages = (applicants = []) => {
+  const stages = STAGE_KEYS.reduce((acc, key) => ({ ...acc, [key]: [] }), {});
+  applicants.forEach(({ stage, ...candidate }) => {
+    (stages[stage] ?? stages.ingested).push(candidate);
+  });
+  return stages;
+};
 import { 
   Button, 
   Card, 
@@ -24,7 +43,8 @@ import {
   Empty,
   Avatar,
   Segmented,
-  Table
+  Table,
+  InputNumber
 } from 'antd';
 import {
   FireOutlined,
@@ -66,9 +86,19 @@ const Requirements = ({ onViewPipeline }) => {
   const { data: requirements, error, isLoading, isFetching } = useGetRequirementsQuery();
   // 3. Destructure the mutation trigger and its execution states
   const [addRequirement, { isLoading: isSubmitting }] = useAddRequirementMutation();
+  // Resume upload → backend parses the file and persists a candidate in lowdb
+  const [uploadResume] = useUploadResumeMutation();
+  // Pipeline stage persistence (load on open, save on change)
+  const [loadPipeline] = useLazyGetPipelineStagesQuery();
+  const [savePipelineStages] = useSavePipelineStagesMutation();
+  // Dice market intelligence + AI job-summary generation
+  const [fetchMarketIntelligence, { isLoading: isMarketLoading }] = useGetMarketIntelligenceMutation();
+  const [generateJobSummary] = useGenerateJobSummaryMutation();
   
   // Ant Design form hook instance
   const [form] = Form.useForm();
+  // Watch job type so we can conditionally show hourly-rate fields for W2 / C2C.
+  const jobType = Form.useWatch('jobType', form);
   // Mock live market state (This would ideally update via your Dice MCP backend debounce)
   const [marketData, setMarketData] = useState({
     supply: { count: 1420, level: 'High Competition', status: 'error' },
@@ -96,76 +126,126 @@ const Requirements = ({ onViewPipeline }) => {
 
   const applicants = viewReq ? (applicantsByReq[viewReq.id] ?? []) : [];
 
-  const handleView = (req) => {
-    // Seed mock applicants the first time a requirement is opened
-    setApplicantsByReq((prev) =>
-      prev[req.id]
-        ? prev
-        : {
-            ...prev,
-            [req.id]: [
-              { id: 1, name: 'Janon Belha', email: 'janon.belha@example.com', stage: 'l1' },
-              { id: 2, name: 'Maria Lopez', email: 'maria.lopez@example.com', stage: 'ranked' },
-              { id: 3, name: 'Aiden Clark', email: 'aiden.clark@example.com', stage: 'ingested' },
-            ],
-          }
-    );
+  const handleView = async (req) => {
     setViewReq(req);
+    // Load the persisted pipeline stages for this requirement from the backend.
+    try {
+      const stages = await loadPipeline(req.id).unwrap();
+      setApplicantsByReq((prev) => ({ ...prev, [req.id]: stagesToApplicants(stages) }));
+    } catch (err) {
+      console.error('Failed to load pipeline:', err);
+    }
+  };
+
+  // Apply an applicant-list change locally and persist the rebuilt stages to the backend.
+  const persistApplicants = (reqId, updater) => {
+    setApplicantsByReq((prev) => {
+      const nextList = updater(prev[reqId] ?? []);
+      savePipelineStages({ requirementId: reqId, stages: applicantsToStages(nextList) });
+      return { ...prev, [reqId]: nextList };
+    });
   };
 
   // Add a candidate from the database into the Ingested stage
   const handleAddFromDb = (candidateId) => {
     const cand = CANDIDATE_DB.find((c) => c.id === candidateId);
     if (!cand || !viewReq) return;
-    setApplicantsByReq((prev) => {
-      const list = prev[viewReq.id] ?? [];
-      if (list.some((c) => c.id === cand.id)) {
-        message.info(`${cand.name} is already in this pipeline`);
-        return prev;
-      }
-      message.success(`${cand.name} added to pipeline (Ingested)`);
-      return { ...prev, [viewReq.id]: [...list, { id: cand.id, name: cand.name, email: cand.email, stage: 'ingested' }] };
-    });
+    const list = applicantsByReq[viewReq.id] ?? [];
+    if (list.some((c) => c.id === cand.id)) {
+      message.info(`${cand.name} is already in this pipeline`);
+      return;
+    }
+    persistApplicants(viewReq.id, (l) => [
+      ...l,
+      { id: cand.id, name: cand.name, email: cand.email, skills: cand.skills, stage: 'ingested' },
+    ]);
+    message.success(`${cand.name} added to pipeline (Ingested)`);
     setAddPick(null);
   };
 
-  // Handle a dropped/uploaded resume — creates a candidate in the Ingested stage
-  const handleResumeUpload = (file) => {
+  // Add a parsed candidate into the current requirement's Ingested stage.
+  const addCandidateToPipeline = (reqId, candidate) => {
+    persistApplicants(reqId, (list) =>
+      list.some((c) => c.id === candidate.id)
+        ? list
+        : [
+            ...list,
+            {
+              id: candidate.id,
+              name: candidate.name,
+              email: candidate.email,
+              skills: candidate.skills,
+              stage: 'ingested',
+            },
+          ],
+    );
+  };
+
+  // Handle a dropped/uploaded resume — parses it on the backend, persists the
+  // candidate to lowdb, then drops the parsed candidate into the Ingested stage.
+  const handleResumeUpload = async (file) => {
     if (!viewReq) return false;
-    const derivedName = file.name.replace(/\.(pdf|docx?|txt)$/i, '').replace(/[_-]+/g, ' ').trim();
-    const newCand = {
-      id: `r-${Date.now()}-${Math.round(Math.random() * 1000)}`,
-      name: derivedName || 'New Candidate',
-      email: 'pending — parsing resume',
-      stage: 'ingested',
-    };
-    setApplicantsByReq((prev) => ({
-      ...prev,
-      [viewReq.id]: [...(prev[viewReq.id] ?? []), newCand],
-    }));
-    message.success(`${file.name} uploaded — candidate added to Ingested`);
+    const reqId = viewReq.id;
+    try {
+      const candidate = await uploadResume(file).unwrap();
+      addCandidateToPipeline(reqId, candidate);
+      message.success(`${candidate.name} parsed and added to Ingested`);
+    } catch (err) {
+      // 409 = duplicate candidate already in the database; still surface them.
+      if (err?.status === 409 && err.data?.candidate) {
+        addCandidateToPipeline(reqId, err.data.candidate);
+        message.info(`${err.data.candidate.name} already exists — added from database`);
+      } else {
+        console.error('Resume upload failed:', err);
+        message.error(`Failed to parse ${file.name}`);
+      }
+    }
     return false; // prevent antd from actually uploading
   };
 
-  // Simulated AI Generation Function
+  // AI-generate the job description from the collected form fields (via Claude on the backend).
   const handleAIFill = async () => {
-    const values = form.getFieldsValue(['title', 'mustHaves']);
+    const values = form.getFieldsValue([
+      'title', 'department', 'location', 'workMode', 'jobType',
+      'salaryMin', 'salaryMax', 'hourlyRateMin', 'hourlyRateMax', 'mustHaves', 'niceToHaves',
+    ]);
     if (!values.title) {
       message.warning('Please enter a Requirement Title first so the AI has context!');
       return;
     }
 
     setIsGenerating(true);
-    
-    // Simulate API delay from your LLM/MCP backend
-    setTimeout(() => {
-      const coreSkills = values.mustHaves ? values.mustHaves.join(', ') : 'core technologies';
-      const generatedText = `We are seeking a talented ${values.title} to join our team. In this role, you will be responsible for designing, developing, and maintaining high-performance systems. The ideal candidate has deep expertise across our primary stack, including ${coreSkills}, and thrives in an agile engineering environment.`;
-      
-      form.setFieldsValue({ description: generatedText });
+    try {
+      const { summary } = await generateJobSummary(values).unwrap();
+      form.setFieldsValue({ description: summary });
+      message.success('Job description generated with AI!');
+    } catch (err) {
+      if (err?.status === 503) {
+        message.error('AI is not configured on the server (missing ANTHROPIC_API_KEY).');
+      } else {
+        console.error('AI job summary failed:', err);
+        message.error('Failed to generate job description.');
+      }
+    } finally {
       setIsGenerating(false);
-      message.success('Job description optimized with AI insights!');
-    }, 1200);
+    }
+  };
+
+  // Fetch live Dice market intelligence based on the current form values.
+  const handleRefreshMarket = async () => {
+    const values = form.getFieldsValue(['title', 'mustHaves', 'location', 'workMode', 'jobType']);
+    if (!values.title) {
+      message.warning('Enter a Requirement Title to gather market intelligence.');
+      return;
+    }
+    try {
+      const data = await fetchMarketIntelligence(values).unwrap();
+      setMarketData(data);
+      message.success(`Market intelligence updated (${data.sampleSize ?? 0} live postings sampled).`);
+    } catch (err) {
+      console.error('Market intelligence failed:', err);
+      message.error('Could not fetch live Dice market intelligence.');
+    }
   };
 
   // Handle opening and resetting form
@@ -464,6 +544,99 @@ const Requirements = ({ onViewPipeline }) => {
             <Select mode="tags" placeholder="e.g., Docker, AWS, Bedrock" size="large" />
           </Form.Item>
 
+          {/* Location & work mode */}
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item
+                name="location"
+                label="Location"
+                rules={[{ required: true, message: 'Enter a location (e.g., Reston, VA)' }]}
+              >
+                <Input placeholder="e.g., Reston, VA" size="large" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item
+                name="workMode"
+                label="Work Mode"
+                rules={[{ required: true, message: 'Select a work mode' }]}
+              >
+                <Select placeholder="Select work mode" size="large">
+                  <Select.Option value="Onsite">Onsite</Select.Option>
+                  <Select.Option value="Hybrid">Hybrid</Select.Option>
+                  <Select.Option value="Remote">Remote</Select.Option>
+                </Select>
+              </Form.Item>
+            </Col>
+          </Row>
+
+          {/* Job type & salary range */}
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item
+                name="jobType"
+                label="Job Type"
+                rules={[{ required: true, message: 'Select an employment type' }]}
+              >
+                <Select placeholder="Select job type" size="large">
+                  <Select.Option value="Full-time">Full-time</Select.Option>
+                  <Select.Option value="W2">W2 (Contract)</Select.Option>
+                  <Select.Option value="C2C">C2C (Corp-to-Corp)</Select.Option>
+                </Select>
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item label="Annual Salary Range ($)">
+                <Space.Compact style={{ width: '100%' }}>
+                  <Form.Item name="salaryMin" noStyle>
+                    <InputNumber
+                      size="large"
+                      placeholder="Min"
+                      min={0}
+                      step={5000}
+                      style={{ width: '50%' }}
+                      formatter={(v) => (v ? `${v}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',') : '')}
+                      parser={(v) => (v ? v.replace(/[^\d]/g, '') : '')}
+                    />
+                  </Form.Item>
+                  <Form.Item name="salaryMax" noStyle>
+                    <InputNumber
+                      size="large"
+                      placeholder="Max"
+                      min={0}
+                      step={5000}
+                      style={{ width: '50%' }}
+                      formatter={(v) => (v ? `${v}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',') : '')}
+                      parser={(v) => (v ? v.replace(/[^\d]/g, '') : '')}
+                    />
+                  </Form.Item>
+                </Space.Compact>
+              </Form.Item>
+            </Col>
+          </Row>
+
+          {/* Hourly rate — only relevant for W2 / C2C contract roles */}
+          {(jobType === 'W2' || jobType === 'C2C') && (
+            <Form.Item label={`Hourly Rate Range — ${jobType} ($/hr)`}>
+              <Space.Compact style={{ width: '100%' }}>
+                <Form.Item
+                  name="hourlyRateMin"
+                  noStyle
+                  rules={[{ required: true, message: 'Enter a minimum hourly rate' }]}
+                >
+                  <InputNumber size="large" placeholder="Min $/hr" min={0} step={5} style={{ width: '50%' }} />
+                </Form.Item>
+                <Form.Item
+                  name="hourlyRateMax"
+                  noStyle
+                  rules={[{ required: true, message: 'Enter a maximum hourly rate' }]}
+                >
+                  <InputNumber size="large" placeholder="Max $/hr" min={0} step={5} style={{ width: '50%' }} />
+                </Form.Item>
+              </Space.Compact>
+            </Form.Item>
+          )}
+
           {/* Core Job Context description block */}
           {/* <Form.Item
             name="description"
@@ -511,9 +684,18 @@ const Requirements = ({ onViewPipeline }) => {
               <span role="img" aria-label="chart">📊</span>
               <Text strong style={{ fontSize: 15 }}>Live Dice Market Intelligence</Text>
               <Text type="secondary" style={{ fontSize: 12 }}>
-                (<SyncOutlined spin style={{ marginRight: 4 }} />Just Now via MCP)
+                ({isMarketLoading ? <SyncOutlined spin style={{ marginRight: 4 }} /> : null}
+                {isMarketLoading ? 'Querying Dice MCP…' : 'via Dice MCP'})
               </Text>
             </Space>
+            <Button
+              size="small"
+              icon={<SyncOutlined spin={isMarketLoading} />}
+              loading={isMarketLoading}
+              onClick={handleRefreshMarket}
+            >
+              Refresh
+            </Button>
           </Flex>
 
           {/* Grid Layout for the 4 Intel Widgets */}
@@ -523,11 +705,11 @@ const Requirements = ({ onViewPipeline }) => {
             <Card size="small" style={{ flex: '1 1 80px', textAlign: 'center' }}>
               <Text type="secondary" strong style={{ display: 'block', marginBottom: 8 }}>Supply Index</Text>
               <FireOutlined style={{ fontSize: 28, color: '#ff4d4f', marginBottom: 8 }} />
-              <Progress percent={85} showInfo={false} strokeColor="#ff4d4f" size={['100%', 6]} />
+              <Progress percent={Math.min(100, Math.round((marketData.supply.count / 2000) * 100))} showInfo={false} strokeColor="#ff4d4f" size={['100%', 6]} />
               <div style={{ marginTop: 8, fontSize: 12, lineHeight: '1.4' }}>
-                <Badge status="error" text={<strong>High Competition</strong>} /><br />
+                <Badge status={marketData.supply.status} text={<strong>{marketData.supply.level}</strong>} /><br />
                 <Text type="secondary">({marketData.supply.count} Active Roles)</Text><br />
-                <Text type="secondary" style={{ fontSize: 11 }}>Reston/DC area listings; expect longer time-to-hire.</Text>
+                <Text type="secondary" style={{ fontSize: 11 }}>Live count of competing postings for this stack.</Text>
               </div>
             </Card>
 
@@ -537,9 +719,9 @@ const Requirements = ({ onViewPipeline }) => {
               <DashboardOutlined style={{ fontSize: 28, color: '#faad14', marginBottom: 8 }} />
               <Progress percent={marketData.velocity.remotePct} type="dashboard" size={40} strokeColor="#faad14" gapDegree={120} />
               <div style={{ marginTop: 8, fontSize: 12, lineHeight: '1.4' }}>
-                <Text type="warning" strong><WarningOutlined /> Market Mismatch</Text><br />
-                <Text type="secondary">({marketData.velocity.remotePct}% Remote)</Text><br />
-                <Text type="secondary" style={{ fontSize: 11 }}>Your 3-day on-site requirement restricts pool by ~{marketData.velocity.impact}%.</Text>
+                <Text type="warning" strong><WarningOutlined /> Remote / Hybrid Demand</Text><br />
+                <Text type="secondary">({marketData.velocity.remotePct}% Remote/Hybrid)</Text><br />
+                <Text type="secondary" style={{ fontSize: 11 }}>An onsite-only requirement restricts the pool by ~{marketData.velocity.impact}%.</Text>
               </div>
             </Card>
 
@@ -549,12 +731,12 @@ const Requirements = ({ onViewPipeline }) => {
               <div style={{ padding: '0 10px' }}>
                 <Text type="secondary" style={{ fontSize: 11, textAlign: 'center', display: 'block' }}>Median</Text>
                 <Slider defaultValue={45} disabled tooltip={{ open: false }} style={{ margin: '8px 0' }} />
-                <Text strong style={{ display: 'block', textAlign: 'center', fontSize: 12 }}>${marketData.salary.marketMedian.toLocaleString()}</Text>
+                <Text strong style={{ display: 'block', textAlign: 'center', fontSize: 12 }}>${(marketData.salary.marketMedian || 0).toLocaleString()}</Text>
               </div>
               <div style={{ marginTop: 8, fontSize: 12, lineHeight: '1.4', textAlign: 'center' }}>
-                <Badge status="warning" text={<strong>Below Median</strong>} /><br />
+                <Badge status="processing" text={<strong>Market Median</strong>} /><br />
                 <Text type="secondary">({marketData.salary.targetPercentile}th Percentile)</Text><br />
-                <Text type="secondary" style={{ fontSize: 11 }}>Dice localized stack rate is $158k. Target $145k may cause candidate drop-off.</Text>
+                <Text type="secondary" style={{ fontSize: 11 }}>Median annual salary parsed from live Dice postings.</Text>
               </div>
             </Card>
 

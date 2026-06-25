@@ -8,6 +8,9 @@ import {
   Typography,
   Button,
   Modal,
+  Tooltip,
+  Drawer,
+  Input,
   Select
 } from 'antd';
 import {
@@ -19,12 +22,17 @@ import {
   ArrowUpOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
-  GlobalOutlined
+  GlobalOutlined,
+  ShopOutlined,
+  SearchOutlined,
+  AimOutlined,
+  ThunderboltOutlined
 } from '@ant-design/icons';
 import Dashboard from './components/Dashboard';
 import Candidates from './components/Candidates';
 import Requirements from './components/Requirements';
 import Pipeline from './components/Pipeline';
+import Vendors from './components/Vendors';
 import Settings from './components/Settings';
 
 const { Header, Sider, Content } = Layout;
@@ -36,6 +44,8 @@ const App = () => {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [region, setRegion] = useState('global');
   const [pipelineReqId, setPipelineReqId] = useState(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [search, setSearch] = useState('');
 
   // Navigate to the Pipelines tab and preselect the given requirement
   const handleViewPipeline = (reqId) => {
@@ -53,8 +63,9 @@ const App = () => {
   const menuTitles = {
     '1': 'Dashboard',
     '2': 'Candidates',
-    '3': 'Requirements',
+    '3': 'Job Requirements',
     '4': 'Pipelines',
+    '5': 'Vendors',
   };
 
   const userMenuItems = [
@@ -94,6 +105,11 @@ const App = () => {
       key: '4',
       icon: <ArrowUpOutlined />,
       label: 'Pipelines',
+    },
+    {
+      key: '5',
+      icon: <ShopOutlined />,
+      label: 'Vendors',
     },
   ];
 
@@ -156,6 +172,23 @@ const App = () => {
         <Settings />
       </Modal>
 
+      <Drawer
+        title="Search with claude"
+        placement="right"
+        width={380}
+        open={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+      >
+        <Input rows={4}
+          placeholder="Search by name, email or skill"
+          prefix={<SearchOutlined />}
+          allowClear
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          style={{ marginBottom: 16 }}
+        />
+
+      </Drawer>
       {/* --- Right side Viewport Wrapper --- */}
       <Layout style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
         
@@ -185,6 +218,9 @@ const App = () => {
               style={{ minWidth: 140 }}
               aria-label="Operating region"
             />
+            <Tooltip title="Ask Claude AI">
+            <Button type="text" onClick={() => setDrawerOpen(true)} icon={<ThunderboltOutlined style={{ fontSize: 18 }} />} />
+            </Tooltip>
             <Button type="text" onClick={() => setSettingsOpen(true)} icon={<SettingOutlined style={{ fontSize: 18 }} />} />
             <Dropdown menu={{ items: userMenuItems }} placement="bottomRight" arrow>
               <Space style={{ cursor: 'pointer' }}>
@@ -208,6 +244,9 @@ const App = () => {
 
           {/* Pipelines */}
           {selectedMenu === '4' && <Pipeline reqId={pipelineReqId} />}
+
+          {/* Vendors */}
+          {selectedMenu === '5' && <Vendors />}
         </Content>
 
       </Layout>

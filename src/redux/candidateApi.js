@@ -42,7 +42,20 @@ export const candidateApi = createApi({
       }),
       invalidatesTags: ['Candidates'], // Invalidate the 'Candidates' tag to refetch the list after deletion
     }),
+    // Upload a resume file; the backend parses it and creates a candidate.
+    uploadResume: builder.mutation({
+      query: (file) => {
+        const formData = new FormData();
+        formData.append('resume', file);
+        return {
+          url: '/candidates/upload',
+          method: 'POST',
+          body: formData,
+        };
+      },
+      invalidatesTags: ['Candidates'],
+    }),
   }),
 });
 
-export const { useGetAllCandidatesQuery, useGetCandidatesDetailsQuery, useAddCandidateMutation, useEditCandidateMutation, useDeleteCandidateMutation } = candidateApi;
+export const { useGetAllCandidatesQuery, useGetCandidatesDetailsQuery, useAddCandidateMutation, useEditCandidateMutation, useDeleteCandidateMutation, useUploadResumeMutation } = candidateApi;

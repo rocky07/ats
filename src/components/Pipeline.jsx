@@ -2,6 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { Button, Card, Typography, Select, Drawer, Input, Empty, message, Dropdown, Modal, Radio, Space, Tooltip, Segmented } from 'antd';
 import { PlusOutlined, TeamOutlined, SearchOutlined, DownOutlined, FileAddOutlined, EyeOutlined, EditOutlined, DeleteOutlined, ShareAltOutlined, CopyOutlined, CompressOutlined } from '@ant-design/icons';
 import { useGetRequirementsQuery } from '../redux/requirementsApi';
+import { useGetPipelineStagesQuery, useSavePipelineStagesMutation } from '../redux/pipelineStagesApi';
+
+// The canonical empty pipeline — one array per stage.
+const EMPTY_STAGES = { ingested: [], ranked: [], l1: [], l2: [], l3: [] };
 
 const { Title, Text } = Typography;
 
@@ -62,20 +66,32 @@ const Pipeline = ({ reqId = null }) => {
   const [examMode, setExamMode] = useState('view'); // 'view' | 'edit'
   const [examDraft, setExamDraft] = useState(SAMPLE_EXAM);
   const [answers, setAnswers] = useState({}); // { [questionId]: 'A'|'B'|'C'|'D' }
-  const [pipelineData, setPipelineData] = useState({
-    ingested: [
-      { id: 1, name: 'Candidate 1', email: 'candidate1@example.com', skills: ['Node.js', 'React'] },
-      { id: 2, name: 'Candidate 2', email: 'candidate2@example.com', skills: ['Node.js', 'Vue'] },
-    ],
-    ranked: [
-      { id: 3, name: 'Candidate Name 1', email: 'candidate3@example.com', skills: ['Skill 1', 'Skill 2'], score: 85 },
-      { id: 4, name: 'Candidate Name 2', email: 'candidate4@example.com', skills: ['Skill 1', 'Skill 2'], score: 75 },
-    ],
-    l1: [],
-    l2: [],
-    l3: [],
-  });
+  const [pipelineData, setPipelineData] = useState(EMPTY_STAGES);
   const [draggedCandidate, setDraggedCandidate] = useState(null);
+
+  // Load the persisted stages for the selected requirement from the backend.
+  const { data: savedStages, isFetching: isLoadingStages } = useGetPipelineStagesQuery(
+    selectedReqId,
+    { skip: selectedReqId == null },
+  );
+  const [savePipelineStages] = useSavePipelineStagesMutation();
+
+  // Populate the board whenever a new requirement's stages arrive (or none selected).
+  useEffect(() => {
+    if (selectedReqId == null) {
+      setPipelineData(EMPTY_STAGES);
+    } else if (savedStages) {
+      setPipelineData({ ...EMPTY_STAGES, ...savedStages });
+    }
+  }, [selectedReqId, savedStages]);
+
+  // Apply a stage change locally and persist it to the backend.
+  const persistStages = (nextData) => {
+    setPipelineData(nextData);
+    if (selectedReqId != null) {
+      savePipelineStages({ requirementId: selectedReqId, stages: nextData });
+    }
+  };
 
   const handleDragStart = (e, candidate, sourceStage) => {
     setDraggedCandidate({ candidate, sourceStage });
@@ -98,17 +114,12 @@ const Pipeline = ({ reqId = null }) => {
       return;
     }
 
-    setPipelineData(prev => {
-      const updated = { ...prev };
-      
-      // Remove from source stage
-      updated[sourceStage] = updated[sourceStage].filter(c => c.id !== candidate.id);
-      
-      // Add to target stage
-      updated[targetStage] = [...updated[targetStage], candidate];
-      
-      return updated;
-    });
+    const updated = { ...pipelineData };
+    // Remove from source stage
+    updated[sourceStage] = updated[sourceStage].filter(c => c.id !== candidate.id);
+    // Add to target stage
+    updated[targetStage] = [...updated[targetStage], candidate];
+    persistStages(updated);
 
     setDraggedCandidate(null);
   };
@@ -119,14 +130,18 @@ const Pipeline = ({ reqId = null }) => {
 
   // Add a candidate from the database into the Ingested stage
   const handleAddToIngested = (candidate) => {
+    if (selectedReqId == null) {
+      message.warning('Select a requirement first');
+      return;
+    }
     if (isInPipeline(candidate.id)) {
       message.info(`${candidate.name} is already in the pipeline`);
       return;
     }
-    setPipelineData((prev) => ({
-      ...prev,
-      ingested: [...prev.ingested, candidate],
-    }));
+    persistStages({
+      ...pipelineData,
+      ingested: [...pipelineData.ingested, candidate],
+    });
     message.success(`${candidate.name} added to Ingested`);
   };
 
@@ -249,11 +264,9 @@ const Pipeline = ({ reqId = null }) => {
             Add Candidates
           </Button>
           <Button type="primary" style={{ backgroundColor: '#2563eb', height: 40, paddingInline: 24 }}>
-            Trigger Ranking (Opus)
+            Trigger Ranking
           </Button>
-        </div>
-      </div>
-<Tooltip title="Toggle compact cards to fit more candidates per column">
+          <Tooltip title="Toggle compact cards to fit more candidates per column">
             <Button
               icon={<CompressOutlined />}
               type={compact ? 'primary' : 'default'}
@@ -262,6 +275,9 @@ const Pipeline = ({ reqId = null }) => {
             >
             </Button>
           </Tooltip>
+        </div>
+      </div>
+
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16, minHeight: compact ? 'auto' : 600, alignItems: 'start' }}>
         {[
           { key: 'ingested', label: 'Ingested (Claude Parsed)' },
@@ -320,7 +336,7 @@ const Pipeline = ({ reqId = null }) => {
                         EMAIL: {candidate.email}
                       </div>
                       <div style={{ fontSize: 11, color: '#666', marginTop: 2 }}>
-                        SKILLS: {candidate.skills.join(', ')}
+                        SKILLS: {(candidate.skills || []).join(', ')}
                       </div>
                       {candidate.score && (
                         <div style={{ marginTop: 8, padding: 8, backgroundColor: '#dbeafe', borderRadius: 4, fontSize: 11, fontWeight: 600 }}>
@@ -381,7 +397,7 @@ const Pipeline = ({ reqId = null }) => {
                       <Text strong>{candidate.name}</Text>
                       <div style={{ fontSize: 11, color: '#666', marginTop: 4 }}>{candidate.email}</div>
                       <div style={{ fontSize: 11, color: '#666', marginTop: 2 }}>
-                        SKILLS: {candidate.skills.join(', ')}
+                        SKILLS: {(candidate.skills || []).join(', ')}
                       </div>
                     </div>
                     <Button
