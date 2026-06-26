@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
-import { useGetRequirementsQuery,useAddRequirementMutation} from '../redux/requirementsApi';
-import { useUploadResumeMutation } from '../redux/candidateApi';
+import React, { useState, useEffect } from 'react';
+import dayjs from 'dayjs';
+import { useGetRequirementsQuery, useAddRequirementMutation, useUpdateRequirementMutation } from '../redux/requirementsApi';
+import { useUploadResumeMutation,useGetAllCandidatesQuery } from '../redux/candidateApi';
 import { useLazyGetPipelineStagesQuery, useSavePipelineStagesMutation } from '../redux/pipelineStagesApi';
 import { useGetMarketIntelligenceMutation, useGenerateJobSummaryMutation } from '../redux/intelligenceApi';
 
@@ -19,16 +20,16 @@ const applicantsToStages = (applicants = []) => {
   });
   return stages;
 };
-import { 
-  Button, 
-  Card, 
-  Col, 
-  Input, 
-  Row, 
-  Typography, 
-  Modal, 
-  Form, 
-  message, 
+import {
+  Button,
+  Card,
+  Col,
+  Input,
+  Row,
+  Typography,
+  Modal,
+  Form,
+  message,
   Select,
   Flex,
   Space,
@@ -39,6 +40,7 @@ import {
   Upload,
   Tag,
   List,
+  DatePicker,
   Divider,
   Empty,
   Avatar,
@@ -65,15 +67,6 @@ import { SearchOutlined, PlusOutlined } from '@ant-design/icons';
 const { Title, Text } = Typography;
 const { TextArea } = Input;
 
-// Mock candidate database (would come from an API in production)
-const CANDIDATE_DB = [
-  { id: 101, name: 'Maria Lopez', email: 'maria.lopez@example.com', skills: ['Node.js', 'AWS'] },
-  { id: 102, name: 'Aiden Clark', email: 'aiden.clark@example.com', skills: ['React', 'TypeScript'] },
-  { id: 103, name: 'Priya Nair', email: 'priya.nair@example.com', skills: ['Node.js', 'Kafka'] },
-  { id: 104, name: 'Lucas Meyer', email: 'lucas.meyer@example.com', skills: ['Vue', 'Docker'] },
-  { id: 105, name: 'Sara Khan', email: 'sara.khan@example.com', skills: ['Python', 'AWS'] },
-  { id: 106, name: 'David Okoro', email: 'david.okoro@example.com', skills: ['Go', 'Kubernetes'] },
-];
 
 // Pipeline stage display metadata
 const STAGE_LABELS = { ingested: 'Ingested', ranked: 'Ranked', l1: 'L1 (Exam)', l2: 'L2 (Recruiter)', l3: 'L3 (Final)' };
@@ -86,6 +79,10 @@ const Requirements = ({ onViewPipeline }) => {
   const { data: requirements, error, isLoading, isFetching } = useGetRequirementsQuery();
   // 3. Destructure the mutation trigger and its execution states
   const [addRequirement, { isLoading: isSubmitting }] = useAddRequirementMutation();
+  const [updateRequirement] = useUpdateRequirementMutation();
+  const [editingReq, setEditingReq] = useState(null); // null = create mode, object = edit mode
+  // Live candidates from the backend
+  const { data: candidateList = [] } = useGetAllCandidatesQuery();
   // Resume upload → backend parses the file and persists a candidate in lowdb
   const [uploadResume] = useUploadResumeMutation();
   // Pipeline stage persistence (load on open, save on change)
@@ -99,24 +96,58 @@ const Requirements = ({ onViewPipeline }) => {
   const [form] = Form.useForm();
   // Watch job type so we can conditionally show hourly-rate fields for W2 / C2C.
   const jobType = Form.useWatch('jobType', form);
+  const watchedTitle = Form.useWatch('title', form);
+  const watchedMustHaves = Form.useWatch('mustHaves', form);
+  const watchedLocation = Form.useWatch('location', form);
+  const watchedWorkMode = Form.useWatch('workMode', form);
   // Mock live market state (This would ideally update via your Dice MCP backend debounce)
   const [marketData, setMarketData] = useState({
-    supply: { count: 1420, level: 'High Competition', status: 'error' },
-    velocity: { remotePct: 78, impact: 60 },
-    salary: { marketMedian: 158000, targetPercentile: 55 },
-    gaps: { matchPct: 55, trending: [['AWS Bedrock', 24], ['Kafka', 18]] }
+    supply: { count: 0, level: 'High Competition', status: 'error' },
+    velocity: { remotePct: 0, impact: 0 },
+    salary: { marketMedian: 0, targetPercentile: 0 },
+    gaps: { matchPct: 0, trending: [] }
   });
 
   const [isGenerating, setIsGenerating] = useState(false);
 
+  // Auto-fetch market intelligence when all required fields are filled
+  useEffect(() => {
+    const allFilled =
+      watchedTitle?.trim() &&
+      watchedLocation?.trim() &&
+      watchedWorkMode &&
+      jobType &&
+      watchedMustHaves?.length > 0;
+
+    if (!allFilled || !isModalOpen) return;
+
+    const timer = setTimeout(async () => {
+      try {
+        const data = await fetchMarketIntelligence({
+          title: watchedTitle,
+          mustHaves: watchedMustHaves,
+          location: watchedLocation,
+          workMode: watchedWorkMode,
+          jobType,
+        }).unwrap();
+        setMarketData(data);
+      } catch (err) {
+        console.error('Auto market intelligence failed:', err);
+      }
+    }, 800); // debounce so it doesn't fire on every keystroke
+
+    return () => clearTimeout(timer);
+  }, [watchedTitle, watchedMustHaves, watchedLocation, watchedWorkMode, jobType, isModalOpen]);
+
   // --- Layout & filtering ---
   const [viewMode, setViewMode] = useState('card'); // 'card' | 'table'
-  const [showAllReqs, setShowAllReqs] = useState(false); // default: open requirements only
+  const [statusFilter, setStatusFilter] = useState('open'); // 'open' | 'draft' | 'closed' | 'all'
 
-  // A requirement is open unless its isClosed flag is true
-  const isOpenRequirement = (req) => !req.isClosed;
+  const getStatus = (req) => req.status ?? (req.isClosed ? 'closed' : 'open');
+  const STATUS_COLOR = { open: 'green', draft: 'default', closed: 'red' };
+  const isOpenRequirement = (req) => getStatus(req) === 'open';
   const visibleRequirements = (requirements ?? []).filter(
-    (req) => showAllReqs || isOpenRequirement(req)
+    (req) => statusFilter === 'all' || getStatus(req) === statusFilter
   );
 
   // --- View Details modal: applicants & pipeline state ---
@@ -148,7 +179,7 @@ const Requirements = ({ onViewPipeline }) => {
 
   // Add a candidate from the database into the Ingested stage
   const handleAddFromDb = (candidateId) => {
-    const cand = CANDIDATE_DB.find((c) => c.id === candidateId);
+    const cand = candidateList.find((c) => String(c.id) === String(candidateId));
     if (!cand || !viewReq) return;
     const list = applicantsByReq[viewReq.id] ?? [];
     if (list.some((c) => c.id === cand.id)) {
@@ -248,29 +279,40 @@ const Requirements = ({ onViewPipeline }) => {
     }
   };
 
-  // Handle opening and resetting form
-  const showModal = () => {
+  const showModal = (req = null) => {
+    setEditingReq(req);
     setIsModalOpen(true);
   };
 
   const handleCancel = () => {
     form.resetFields();
+    setEditingReq(null);
     setIsModalOpen(false);
   };
 
   // Form submission logic interacting with backend endpoint
   const onFinish = async (values) => {
     setSubmitting(true);
-   try {
-      // Execute the Redux action hook and unwrap the promise response
-      await addRequirement(values).unwrap();
-      
-      message.success('Requirement created successfully!');
+    const payload = {
+      ...values,
+      publishDate: values.publishDate ? values.publishDate.format('YYYY-MM-DD') : null,
+    };
+    try {
+      if (editingReq) {
+        await updateRequirement({ requirementId: editingReq.id, updatedRequirement: payload }).unwrap();
+        message.success('Requirement updated successfully!');
+      } else {
+        await addRequirement(payload).unwrap();
+        message.success('Requirement created successfully!');
+      }
       form.resetFields();
+      setEditingReq(null);
       setIsModalOpen(false);
     } catch (err) {
       console.error('Failed to save the requirement:', err);
-      message.error('Failed to create requirement. Please check backend connection.');
+      message.error(`Failed to ${editingReq ? 'update' : 'create'} requirement. Please check backend connection.`);
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -284,16 +326,16 @@ const Requirements = ({ onViewPipeline }) => {
             style={{ width: 320, borderRadius: 4 }}
             prefix={<SearchOutlined />}
           />
-          <Tooltip title="Show open requirements only, or all (including closed)">
-            <Segmented
-              value={showAllReqs ? 'all' : 'open'}
-              onChange={(val) => setShowAllReqs(val === 'all')}
-              options={[
-                { label: 'Open', value: 'open' },
-                { label: 'All', value: 'all' },
-              ]}
-            />
-          </Tooltip>
+          <Segmented
+            value={statusFilter}
+            onChange={setStatusFilter}
+            options={[
+              { label: 'Open', value: 'open' },
+              { label: 'Draft', value: 'draft' },
+              { label: 'Closed', value: 'closed' },
+              { label: 'All', value: 'all' },
+            ]}
+          />
         </Space>
         <Space size={12}>
           <Segmented
@@ -308,7 +350,7 @@ const Requirements = ({ onViewPipeline }) => {
             type="primary"
             icon={<PlusOutlined />}
             style={{ backgroundColor: '#2563eb', height: 40, paddingInline: 24 }}
-            onClick={showModal}
+            onClick={() => showModal()}
           >
             New Requirement
           </Button>
@@ -321,17 +363,23 @@ const Requirements = ({ onViewPipeline }) => {
         {visibleRequirements.map((req) => (
           <Col xs={24} sm={12} lg={6} key={req.id}>
             <Card bordered={true} style={{ background: '#fff', borderRadius: 8 }}>
-              <Title level={4} style={{ margin: '0 0 12px 0' }}>{req.title}</Title>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+                <Title level={4} style={{ margin: 0 }}>{req.title}</Title>
+                <Tag color={STATUS_COLOR[getStatus(req)]} style={{ marginLeft: 8, textTransform: 'capitalize' }}>
+                  {getStatus(req)}
+                </Tag>
+              </div>
               <div style={{ fontSize: 12, marginBottom: 12 }}>
-                <div><strong>Department:</strong>{req.department}</div>
+                <div><strong>Department:</strong> {req.department}</div>
                 <div><strong>Open Date:</strong> {req.openDate}</div>
+                {req.publishDate && <div><strong>Publish Date:</strong> {req.publishDate}</div>}
               </div>
               <div style={{ marginBottom: 12, fontSize: 12, color: '#666', lineHeight: 1.5 }}>
-                <strong>Description:</strong> Lorem ipsum dolor sit amet, consectetuer donec commos sec. alicd oulsmef, simuntatus...
+                <strong>Description:</strong> {req.description ? `${req.description.slice(0, 100)}…` : 'No description.'}
               </div>
               <div style={{ marginBottom: 12, fontSize: 12 }}>
-                <div><strong>Must-haves:</strong> [Node.js, React, ...]</div>
-                <div><strong>Nice-to-haves:</strong> [AWS, Docker, ...]</div>
+                <div><strong>Must-haves:</strong> {(req.mustHaves ?? []).join(', ') || '—'}</div>
+                <div><strong>Nice-to-haves:</strong> {(req.niceToHaves ?? []).join(', ') || '—'}</div>
               </div>
               <Button
                 type="primary"
@@ -353,7 +401,8 @@ const Requirements = ({ onViewPipeline }) => {
                   </Button>
                 </Col>
                 <Col xs={8}>
-                  <Button 
+                  <Button
+                    onClick={() => showModal(req)}
                     style={{ borderColor: '#000', color: '#000', border: '1px solid #000', width: '100%', height: 40, background: 'transparent' }}
                   >
                     ✎
@@ -374,13 +423,15 @@ const Requirements = ({ onViewPipeline }) => {
             { title: 'Title', dataIndex: 'title', sorter: (a, b) => String(a.title).localeCompare(String(b.title)) },
             { title: 'Department', dataIndex: 'department' },
             { title: 'Open Date', dataIndex: 'openDate' },
+            { title: 'Publish Date', dataIndex: 'publishDate', render: (v) => v || '—' },
             {
               title: 'Status',
               key: 'status',
-              render: (_, req) =>
-                isOpenRequirement(req)
-                  ? <Tag color="green">Open</Tag>
-                  : <Tag color="red">Closed</Tag>,
+              render: (_, req) => (
+                <Tag color={STATUS_COLOR[getStatus(req)]} style={{ textTransform: 'capitalize' }}>
+                  {getStatus(req)}
+                </Tag>
+              ),
             },
             {
               title: 'Actions',
@@ -392,6 +443,9 @@ const Requirements = ({ onViewPipeline }) => {
                   </Button>
                   <Button size="small" onClick={() => onViewPipeline?.(req.id)}>
                     View Pipeline
+                  </Button>
+                  <Button size="small" onClick={() => showModal(req)}>
+                    Edit
                   </Button>
                 </Space>
               ),
@@ -417,13 +471,24 @@ const Requirements = ({ onViewPipeline }) => {
               <Row gutter={[16, 8]} style={{ fontSize: 13 }}>
                 <Col span={12}><Text strong>Department:</Text> {viewReq.department}</Col>
                 <Col span={12}><Text strong>Open Date:</Text> {viewReq.openDate}</Col>
+                <Col span={12}><Text strong>Publish Date:</Text> {viewReq.publishDate || '—'}</Col>
+                <Col span={12}>
+                  <Text strong>Status:</Text>{' '}
+                  <Tag color={STATUS_COLOR[getStatus(viewReq)]} style={{ textTransform: 'capitalize' }}>
+                    {getStatus(viewReq)}
+                  </Tag>
+                </Col>
               </Row>
               <Divider style={{ margin: '12px 0' }} />
               <div style={{ fontSize: 13, marginBottom: 8 }}>
-                <Text strong>Description:</Text> Lorem ipsum dolor sit amet, consectetuer donec commos sec. alicd oulsmef, simuntatus...
+                <Text strong>Description:</Text> {viewReq.description || '—'}
               </div>
-              <div style={{ fontSize: 13 }}><Text strong>Must-haves:</Text> [Node.js, React, ...]</div>
-              <div style={{ fontSize: 13 }}><Text strong>Nice-to-haves:</Text> [AWS, Docker, ...]</div>
+              <div style={{ fontSize: 13, marginBottom: 4 }}>
+                <Text strong>Must-haves:</Text> {(viewReq.mustHaves ?? []).join(', ') || '—'}
+              </div>
+              <div style={{ fontSize: 13 }}>
+                <Text strong>Nice-to-haves:</Text> {(viewReq.niceToHaves ?? []).join(', ') || '—'}
+              </div>
             </Card>
 
             {/* Applicants and their pipeline status */}
@@ -458,7 +523,11 @@ const Requirements = ({ onViewPipeline }) => {
                 onChange={setAddPick}
                 optionFilterProp="label"
                 style={{ flex: 1 }}
-                options={CANDIDATE_DB.map((c) => ({ value: c.id, label: `${c.name} — ${c.skills.join(', ')}` }))}
+                options={candidateList.map((c) => {
+                  const skills = (c.skills ?? []).join(', ');
+                  const skillPreview = skills.length > 30 ? `${skills.slice(0, 30)}…` : skills;
+                  return { value: c.id, label: `${c.name} — ${skillPreview}` };
+                })}
               />
               <Button
                 type="primary"
@@ -486,14 +555,25 @@ const Requirements = ({ onViewPipeline }) => {
         )}
       </Modal>
 
-      {/* --- New Requirement Data Intake Modal Form --- */}
+      {/* --- New / Edit Requirement Modal Form --- */}
       <Modal
-        title={<Title level={3} style={{ margin: 0 }}>Create Requirement</Title>}
+        title={<Title level={3} style={{ margin: 0 }}>{editingReq ? 'Edit Requirement' : 'Create Requirement'}</Title>}
         open={isModalOpen}
         onCancel={handleCancel}
-        footer={null} // Using Form buttons inside instead of default Modal footer buttons
+        footer={null}
         width={600}
-        destroyOnClose
+        afterOpenChange={(open) => {
+          if (open) {
+            if (editingReq) {
+              form.setFieldsValue({
+                ...editingReq,
+                publishDate: editingReq.publishDate ? dayjs(editingReq.publishDate) : null,
+              });
+            } else {
+              form.resetFields();
+            }
+          }
+        }}
       >
         <Form
           form={form}
@@ -565,6 +645,29 @@ const Requirements = ({ onViewPipeline }) => {
                   <Select.Option value="Onsite">Onsite</Select.Option>
                   <Select.Option value="Hybrid">Hybrid</Select.Option>
                   <Select.Option value="Remote">Remote</Select.Option>
+                </Select>
+              </Form.Item>
+            </Col>
+          </Row>
+
+          {/* Publish Date & Status */}
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="publishDate" label="Publish Date">
+                <DatePicker style={{ width: '100%' }} size="large" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item
+                name="status"
+                label="Status"
+                initialValue="draft"
+                rules={[{ required: true, message: 'Select a status' }]}
+              >
+                <Select size="large">
+                  <Select.Option value="draft">Draft</Select.Option>
+                  <Select.Option value="open">Open</Select.Option>
+                  <Select.Option value="closed">Closed</Select.Option>
                 </Select>
               </Form.Item>
             </Col>
@@ -708,7 +811,7 @@ const Requirements = ({ onViewPipeline }) => {
               <Progress percent={Math.min(100, Math.round((marketData.supply.count / 2000) * 100))} showInfo={false} strokeColor="#ff4d4f" size={['100%', 6]} />
               <div style={{ marginTop: 8, fontSize: 12, lineHeight: '1.4' }}>
                 <Badge status={marketData.supply.status} text={<strong>{marketData.supply.level}</strong>} /><br />
-                <Text type="secondary">({marketData.supply.count} Active Roles)</Text><br />
+                <Text type="secondary">(marketData{marketData.supply.count} Active Roles)</Text><br />
                 <Text type="secondary" style={{ fontSize: 11 }}>Live count of competing postings for this stack.</Text>
               </div>
             </Card>
@@ -769,14 +872,14 @@ const Requirements = ({ onViewPipeline }) => {
             <Button onClick={handleCancel} size="large">
               Cancel
             </Button>
-            <Button 
-              type="primary" 
-              htmlType="submit" 
-              loading={submitting} 
+            <Button
+              type="primary"
+              htmlType="submit"
+              loading={submitting}
               size="large"
               style={{ backgroundColor: '#2563eb' }}
             >
-              Submit Requirement
+              {editingReq ? 'Update Requirement' : 'Submit Requirement'}
             </Button>
           </div>
         </Form>

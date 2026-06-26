@@ -1,8 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { Button, Card, Typography, Select, Drawer, Input, Empty, message, Dropdown, Modal, Radio, Space, Tooltip, Segmented } from 'antd';
-import { PlusOutlined, TeamOutlined, SearchOutlined, DownOutlined, FileAddOutlined, EyeOutlined, EditOutlined, DeleteOutlined, ShareAltOutlined, CopyOutlined, CompressOutlined } from '@ant-design/icons';
+import { Button, Card, Typography, Select, Drawer, Input, Empty, message, Dropdown, Modal, Radio, Space, Tooltip, Segmented, Tag } from 'antd';
+import { PlusOutlined, TeamOutlined, SearchOutlined, DownOutlined, FileAddOutlined, EyeOutlined, EditOutlined, DeleteOutlined, ShareAltOutlined, CopyOutlined, CompressOutlined, MailOutlined, CheckCircleOutlined, LinkOutlined } from '@ant-design/icons';
 import { useGetRequirementsQuery } from '../redux/requirementsApi';
 import { useGetPipelineStagesQuery, useSavePipelineStagesMutation } from '../redux/pipelineStagesApi';
+import { useGetAllCandidatesQuery } from '../redux/candidateApi';
+import { useRankCandidatesMutation } from '../redux/intelligenceApi';
+import {
+  useGenerateExamMutation,
+  useGetExamByRequirementQuery,
+  useSendExamInviteMutation,
+} from '../redux/examApi';
+import { API_BASE_URL } from '../config';
 
 // The canonical empty pipeline — one array per stage.
 const EMPTY_STAGES = { ingested: [], ranked: [], l1: [], l2: [], l3: [] };
@@ -39,19 +47,10 @@ const SAMPLE_EXAM = {
 };
 
 // Mock candidate database (would come from an API in production)
-const CANDIDATE_DB = [
-  { id: 101, name: 'Maria Lopez', email: 'maria.lopez@example.com', skills: ['Node.js', 'AWS'] },
-  { id: 102, name: 'Aiden Clark', email: 'aiden.clark@example.com', skills: ['React', 'TypeScript'] },
-  { id: 103, name: 'Priya Nair', email: 'priya.nair@example.com', skills: ['Node.js', 'Kafka'] },
-  { id: 104, name: 'Lucas Meyer', email: 'lucas.meyer@example.com', skills: ['Vue', 'Docker'] },
-  { id: 105, name: 'Sara Khan', email: 'sara.khan@example.com', skills: ['Python', 'AWS'] },
-  { id: 106, name: 'David Okoro', email: 'david.okoro@example.com', skills: ['Go', 'Kubernetes'] },
-  { id: 107, name: 'Elena Rossi', email: 'elena.rossi@example.com', skills: ['Java', 'Spring'] },
-  { id: 108, name: 'Tom Becker', email: 'tom.becker@example.com', skills: ['Node.js', 'GraphQL'] },
-];
 
 const Pipeline = ({ reqId = null }) => {
   const { data: requirements, isLoading } = useGetRequirementsQuery();
+  const { data: candidateList = [] } = useGetAllCandidatesQuery();
   const [selectedReqId, setSelectedReqId] = useState(reqId);
   const [showAllPostings, setShowAllPostings] = useState(false); // default: open postings only
   const [compact, setCompact] = useState(false); // compact card view for long lists
@@ -75,6 +74,17 @@ const Pipeline = ({ reqId = null }) => {
     { skip: selectedReqId == null },
   );
   const [savePipelineStages] = useSavePipelineStagesMutation();
+  const [rankCandidatesApi, { isLoading: isRanking }] = useRankCandidatesMutation();
+
+  // Exam
+  const { data: currentExam, refetch: refetchExam } = useGetExamByRequirementQuery(
+    selectedReqId,
+    { skip: selectedReqId == null },
+  );
+  const [generateExamApi, { isLoading: isGeneratingExam }] = useGenerateExamMutation();
+  const [sendExamInviteApi] = useSendExamInviteMutation();
+  const [inviteModalOpen, setInviteModalOpen] = useState(false);
+  const [inviteCandidate, setInviteCandidate] = useState(null);
 
   // Populate the board whenever a new requirement's stages arrive (or none selected).
   useEffect(() => {
@@ -93,6 +103,53 @@ const Pipeline = ({ reqId = null }) => {
     }
   };
 
+  // Rank one or more candidates via Claude and move them to the ranked stage.
+  // `candidates` can be a subset (single drag) or the full ingested list (button).
+  const rankAndMove = async (candidates, sourceStage = 'ingested') => {
+    if (!selectedReqId) {
+      message.warning('Select a requirement first');
+      return;
+    }
+    const requirement = (requirements ?? []).find((r) => String(r.id) === String(selectedReqId));
+    if (!requirement) {
+      message.warning('Could not find the selected requirement');
+      return;
+    }
+    if (candidates.length === 0) {
+      message.info('No candidates to rank');
+      return;
+    }
+
+    const hide = message.loading(`Ranking ${candidates.length} candidate(s) with Claude…`, 0);
+    try {
+      const { results } = await rankCandidatesApi({ candidates, requirement }).unwrap();
+
+      // Merge scores back into candidates
+      const scored = candidates.map((c) => {
+        const r = results.find((res) => String(res.id) === String(c.id));
+        return r ? { ...c, score: r.score, rankSummary: r.summary } : c;
+      });
+
+      // Remove from source stage, add (with scores) to ranked
+      const updated = { ...pipelineData };
+      const scoredIds = new Set(scored.map((c) => String(c.id)));
+      updated[sourceStage] = updated[sourceStage].filter((c) => !scoredIds.has(String(c.id)));
+      // Keep any existing ranked candidates that weren't part of this batch
+      const existingRanked = updated.ranked.filter((c) => !scoredIds.has(String(c.id)));
+      // Sort new additions by score descending
+      const sortedScored = [...scored].sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+      updated.ranked = [...existingRanked, ...sortedScored];
+
+      persistStages(updated);
+      message.success(`${scored.length} candidate(s) ranked and moved to Ranked`);
+    } catch (err) {
+      console.error('Ranking failed:', err);
+      message.error('Ranking failed. Check that the backend has ANTHROPIC_API_KEY set.');
+    } finally {
+      hide();
+    }
+  };
+
   const handleDragStart = (e, candidate, sourceStage) => {
     setDraggedCandidate({ candidate, sourceStage });
     e.dataTransfer.effectAllowed = 'move';
@@ -108,20 +165,31 @@ const Pipeline = ({ reqId = null }) => {
     if (!draggedCandidate) return;
 
     const { candidate, sourceStage } = draggedCandidate;
+    setDraggedCandidate(null);
 
-    if (sourceStage === targetStage) {
-      setDraggedCandidate(null);
+    if (sourceStage === targetStage) return;
+
+    // Dropping onto ranked triggers Claude ranking
+    if (targetStage === 'ranked') {
+      rankAndMove([candidate], sourceStage);
       return;
     }
 
     const updated = { ...pipelineData };
-    // Remove from source stage
-    updated[sourceStage] = updated[sourceStage].filter(c => c.id !== candidate.id);
-    // Add to target stage
+    updated[sourceStage] = updated[sourceStage].filter((c) => c.id !== candidate.id);
     updated[targetStage] = [...updated[targetStage], candidate];
     persistStages(updated);
 
-    setDraggedCandidate(null);
+    // Dropping onto L1 → prompt to send exam invite
+    if (targetStage === 'l1' && currentExam) {
+      Modal.confirm({
+        title: `Send exam invite to ${candidate.name}?`,
+        content: `This will email the L1 assessment link to ${candidate.email || 'the candidate'}.`,
+        okText: 'Send Invite',
+        okButtonProps: { style: { backgroundColor: '#2563eb' } },
+        onOk: () => handleSendInvite(candidate),
+      });
+    }
   };
 
   // True if a candidate already exists in any pipeline stage
@@ -152,14 +220,32 @@ const Pipeline = ({ reqId = null }) => {
     setExamModalOpen(true);
   };
 
-  const handleExamMenuClick = ({ key }) => {
+  const handleExamMenuClick = async ({ key }) => {
     if (key === 'generate') {
-      message.success('New exam generated from the requirement (sample)');
-      openExam('edit');
+      if (!selectedReqId) { message.warning('Select a requirement first'); return; }
+      const hide = message.loading('Generating exam with Claude…', 0);
+      try {
+        await generateExamApi(selectedReqId).unwrap();
+        refetchExam();
+        message.success('Exam generated and saved!');
+      } catch (err) {
+        message.error('Failed to generate exam. Check ANTHROPIC_API_KEY.');
+      } finally { hide(); }
     } else if (key === 'view') {
+      if (!currentExam) { message.info('Generate an exam first.'); return; }
+      setExamDraft(currentExam);
       openExam('view');
     } else if (key === 'edit') {
+      if (!currentExam) { message.info('Generate an exam first.'); return; }
+      setExamDraft(currentExam);
       openExam('edit');
+    } else if (key === 'link') {
+      if (!currentExam) { message.info('Generate an exam first.'); return; }
+      const url = `${window.location.origin}/exam/${currentExam.id}`;
+      navigator.clipboard.writeText(url).then(
+        () => message.success('Exam link copied to clipboard'),
+        () => message.info(`Exam link: ${url}`),
+      );
     } else if (key === 'delete') {
       Modal.confirm({
         title: 'Delete online exam?',
@@ -168,6 +254,29 @@ const Pipeline = ({ reqId = null }) => {
         okButtonProps: { danger: true },
         onOk: () => message.success('Online exam deleted'),
       });
+    }
+  };
+
+  const handleSendInvite = async (candidate) => {
+    if (!currentExam) { message.warning('Generate an exam for this requirement first.'); return; }
+    const requirement = (requirements ?? []).find((r) => String(r.id) === String(selectedReqId));
+    try {
+      const { examUrl } = await sendExamInviteApi({
+        candidateId: candidate.id,
+        candidateName: candidate.name,
+        candidateEmail: candidate.email,
+        examId: currentExam.id,
+        jobTitle: requirement?.title ?? 'Job',
+      }).unwrap();
+      // Mark candidate as exam-invited in the pipeline
+      const updated = { ...pipelineData };
+      updated.l1 = updated.l1.map((c) =>
+        String(c.id) === String(candidate.id) ? { ...c, examInvited: true, examId: currentExam.id } : c
+      );
+      persistStages(updated);
+      message.success(`Exam invite sent to ${candidate.name}! Link: ${examUrl}`);
+    } catch {
+      message.error('Failed to send invite. Check EMAIL_USER/EMAIL_PASS env vars.');
     }
   };
 
@@ -197,11 +306,11 @@ const Pipeline = ({ reqId = null }) => {
   };
 
   const examMenuItems = [
-    { key: 'generate', icon: <FileAddOutlined />, label: 'Generate New' },
-    { key: 'view', icon: <EyeOutlined />, label: 'View' },
-    { key: 'edit', icon: <EditOutlined />, label: 'Edit' },
+    { key: 'generate', icon: <FileAddOutlined />, label: currentExam ? 'Regenerate Exam' : 'Generate Exam' },
+    { key: 'view', icon: <EyeOutlined />, label: 'Preview Exam', disabled: !currentExam },
+    { key: 'link', icon: <LinkOutlined />, label: 'Copy Exam Link', disabled: !currentExam },
     { type: 'divider' },
-    { key: 'delete', icon: <DeleteOutlined />, label: 'Delete', danger: true },
+    { key: 'delete', icon: <DeleteOutlined />, label: 'Delete Exam', danger: true, disabled: !currentExam },
   ];
 
   // A posting is treated as open unless its isClosed flag is true
@@ -210,13 +319,13 @@ const Pipeline = ({ reqId = null }) => {
     (req) => showAllPostings || isOpenPosting(req) || req.id === selectedReqId
   );
 
-  const filteredDb = CANDIDATE_DB.filter((c) => {
+  const filteredDb = candidateList.filter((c) => {
     const q = search.trim().toLowerCase();
     if (!q) return true;
     return (
-      c.name.toLowerCase().includes(q) ||
-      c.email.toLowerCase().includes(q) ||
-      c.skills.some((s) => s.toLowerCase().includes(q))
+      c.name?.toLowerCase().includes(q) ||
+      c.email?.toLowerCase().includes(q) ||
+      (c.skills ?? []).some((s) => s.toLowerCase().includes(q))
     );
   });
 
@@ -248,9 +357,9 @@ const Pipeline = ({ reqId = null }) => {
         </div>
         <div style={{ display: 'flex', gap: 12 }}>
           <Dropdown menu={{ items: examMenuItems, onClick: handleExamMenuClick }} trigger={['click']}>
-            <Button style={{ height: 40, paddingInline: 20 }}>
+            <Button loading={isGeneratingExam} style={{ height: 40, paddingInline: 20 }}>
               <Space>
-                Online Exam
+                {currentExam ? '✅ Exam Ready' : 'Online Exam'}
                 <DownOutlined />
               </Space>
             </Button>
@@ -263,7 +372,12 @@ const Pipeline = ({ reqId = null }) => {
           >
             Add Candidates
           </Button>
-          <Button type="primary" style={{ backgroundColor: '#2563eb', height: 40, paddingInline: 24 }}>
+          <Button
+            type="primary"
+            loading={isRanking}
+            onClick={() => rankAndMove(pipelineData.ingested ?? [], 'ingested')}
+            style={{ backgroundColor: '#2563eb', height: 40, paddingInline: 24 }}
+          >
             Trigger Ranking
           </Button>
           <Tooltip title="Toggle compact cards to fit more candidates per column">
@@ -323,11 +437,19 @@ const Pipeline = ({ reqId = null }) => {
                   {compact ? (
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, fontSize: 12 }}>
                       <Text strong ellipsis style={{ flex: 1 }}>{candidate.name}</Text>
-                      {candidate.score && (
-                        <span style={{ padding: '1px 6px', backgroundColor: '#dbeafe', borderRadius: 4, fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap' }}>
-                          {candidate.score}
-                        </span>
-                      )}
+                      <Space size={4}>
+                        {candidate.score != null && (
+                          <Tooltip title={candidate.rankSummary}>
+                            <Tag color="blue" style={{ fontSize: 10, cursor: 'help', margin: 0 }}>{candidate.score}/100</Tag>
+                          </Tooltip>
+                        )}
+                        {stage.key === 'l1' && candidate.examScore != null && (
+                          <Tag color="green" style={{ fontSize: 10, margin: 0 }}>Score: {candidate.examScore}%</Tag>
+                        )}
+                        {stage.key === 'l1' && candidate.examInvited && candidate.examScore == null && (
+                          <Tag color="orange" style={{ fontSize: 10, margin: 0 }}>Exam Sent</Tag>
+                        )}
+                      </Space>
                     </div>
                   ) : (
                     <div style={{ fontSize: 12 }}>
@@ -338,9 +460,31 @@ const Pipeline = ({ reqId = null }) => {
                       <div style={{ fontSize: 11, color: '#666', marginTop: 2 }}>
                         SKILLS: {(candidate.skills || []).join(', ')}
                       </div>
-                      {candidate.score && (
-                        <div style={{ marginTop: 8, padding: 8, backgroundColor: '#dbeafe', borderRadius: 4, fontSize: 11, fontWeight: 600 }}>
-                          RANK SCORE: {candidate.score}-100
+                      {candidate.score != null && (
+                        <Tooltip title={candidate.rankSummary}>
+                          <div style={{ marginTop: 8, padding: 8, backgroundColor: '#dbeafe', borderRadius: 4, fontSize: 11, fontWeight: 600, cursor: 'help' }}>
+                            RANK SCORE: {candidate.score}/100
+                          </div>
+                        </Tooltip>
+                      )}
+                      {stage.key === 'l1' && (
+                        <div style={{ marginTop: 8, display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                          {candidate.examScore != null ? (
+                            <Tag icon={<CheckCircleOutlined />} color="success">
+                              Exam Score: {candidate.examScore}%
+                            </Tag>
+                          ) : candidate.examInvited ? (
+                            <Tag icon={<MailOutlined />} color="orange">Exam Sent</Tag>
+                          ) : (
+                            <Button
+                              size="small"
+                              icon={<MailOutlined />}
+                              onClick={(e) => { e.stopPropagation(); handleSendInvite(candidate); }}
+                              style={{ fontSize: 11, height: 24 }}
+                            >
+                              Send Exam
+                            </Button>
+                          )}
                         </div>
                       )}
                     </div>

@@ -23,7 +23,15 @@ export const intelligenceApi = createApi({
         body: form,
       }),
     }),
+    // Rank a list of candidates against a job requirement using Claude.
+    rankCandidates: builder.mutation({
+      query: ({ candidates, requirement }) => ({
+        url: '/intelligence/rank',
+        method: 'POST',
+        body: { candidates, requirement },
+      }),
+    }),
   }),
 });
 
-export const { useGetMarketIntelligenceMutation, useGenerateJobSummaryMutation } = intelligenceApi;
+export const { useGetMarketIntelligenceMutation, useGenerateJobSummaryMutation, useRankCandidatesMutation } = intelligenceApi;

@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { API_BASE_URL } from './config';
 import { 
   Layout, 
   Menu, 
@@ -26,7 +27,8 @@ import {
   GlobalOutlined,
   ShopOutlined,
   SendOutlined,
-  ThunderboltOutlined
+  ThunderboltOutlined,
+  RobotOutlined
 } from '@ant-design/icons';
 import Dashboard from './components/Dashboard';
 import Candidates from './components/Candidates';
@@ -76,22 +78,15 @@ const ClaudeDrawer = ({ open, onClose }) => {
         .filter((m) => m.role !== 'system')
         .map((m) => ({ role: m.role, content: m.text }));
 
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
+      const res = await fetch(`${API_BASE_URL}/intelligence/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-6',
-          max_tokens: 1000,
-          system:
-            'You are an ATS (Applicant Tracking System) assistant embedded in Bourntec ATS. Help users find candidates, review job requirements, check pipeline status, and manage vendor relationships. Be concise and actionable.',
-          messages: history,
-        }),
+        body: JSON.stringify({ history }),
       });
 
       const data = await res.json();
-      const reply =
-        data?.content?.find((b) => b.type === 'text')?.text ??
-        'Sorry, I couldn\'t get a response. Please try again.';
+      if (!res.ok) throw new Error(data.error ?? 'Server error');
+      const reply = data.reply ?? 'Sorry, I couldn\'t get a response. Please try again.';
 
       setMessages((prev) => [
         ...prev,
@@ -425,7 +420,7 @@ const App = () => {
               <Button
                 type="text"
                 onClick={() => setDrawerOpen(true)}
-                icon={<ThunderboltOutlined style={{ fontSize: 18, color: '#da7756' }} />}
+                icon={<RobotOutlined style={{ fontSize: 18, color: '#da7756' }} />}
               />
             </Tooltip>
             <Button

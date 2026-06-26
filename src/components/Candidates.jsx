@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { Button, Card, Input, Space, Pagination, message, Spin } from 'antd';
+import { Button, Card, Input, Space, Pagination, message, Spin, Modal, Descriptions, Tag } from 'antd';
 import { SearchOutlined, UploadOutlined } from '@ant-design/icons';
 import {
   useGetAllCandidatesQuery,
@@ -13,28 +13,76 @@ const Candidates = () => {
   const [search, setSearch] = useState('');
   const fileInputRef = useRef(null);
 
+  // Modal and profile states
+  const [selectedCandidate, setSelectedCandidate] = useState(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+
   const { data: candidates = [], isLoading, isFetching } = useGetAllCandidatesQuery();
   const [uploadResume, { isLoading: isUploading }] = useUploadResumeMutation();
   const [deleteCandidate] = useDeleteCandidateMutation();
 
   const handleUploadClick = () => fileInputRef.current?.click();
 
-  const handleFileChange = async (event) => {
-    const file = event.target.files?.[0];
-    // Reset the input so selecting the same file again re-triggers onChange.
-    event.target.value = '';
-    if (!file) return;
+  const handleViewProfile = (candidate) => {
+    setSelectedCandidate(candidate);
+    setIsModalOpen(true);
+  };
 
-    try {
-      const candidate = await uploadResume(file).unwrap();
-      message.success(`Parsed resume for ${candidate.name || 'candidate'}`);
-    } catch (err) {
-      console.error('Resume upload failed:', err);
-      if (err?.status === 409) {
-        message.warning(err.data?.error || 'Duplicate candidate — resume rejected');
-      } else {
-        message.error('Failed to upload and parse resume');
+  const handleCloseModal = () => {
+    setSelectedCandidate(null);
+    setIsModalOpen(false);
+  };
+
+  const handleFileChange = async (event) => {
+    const files = event.target.files ? Array.from(event.target.files) : [];
+    event.target.value = '';
+    
+    if (files.length === 0) return;
+
+    const hideLoadingMessage = files.length > 1 ? message.loading(`Uploading ${files.length} resumes...`, 0) : null;
+
+    const uploadPromises = files.map(async (file) => {
+      try {
+        const candidate = await uploadResume(file).unwrap();
+        return { status: 'fulfilled', name: candidate.name || file.name };
+      } catch (err) {
+        return { status: 'rejected', name: file.name, error: err };
       }
+    });
+
+    const results = await Promise.all(uploadPromises);
+    if (hideLoadingMessage) hideLoadingMessage();
+
+    let successCount = 0;
+    let duplicateCount = 0;
+    let failCount = 0;
+
+    results.forEach((res) => {
+      if (res.status === 'fulfilled') {
+        successCount++;
+        if (results.length === 1) {
+          message.success(`Parsed resume for ${res.name}`);
+        }
+      } else {
+        const err = res.error;
+        if (err?.status === 409) {
+          duplicateCount++;
+          if (results.length === 1) {
+            message.warning(err.data?.error || `Duplicate candidate: ${res.name} — rejected`);
+          }
+        } else {
+          failCount++;
+          if (results.length === 1) {
+            message.error(`Failed to upload and parse resume for ${res.name}`);
+          }
+        }
+      }
+    });
+
+    if (results.length > 1) {
+      if (successCount > 0) message.success(`Successfully uploaded ${successCount} resume(s).`);
+      if (duplicateCount > 0) message.warning(`${duplicateCount} duplicate resume(s) were rejected.`);
+      if (failCount > 0) message.error(`Failed to upload ${failCount} resume(s).`);
     }
   };
 
@@ -67,6 +115,7 @@ const Candidates = () => {
         ref={fileInputRef}
         type="file"
         accept=".pdf,.docx,.txt"
+        multiple
         style={{ display: 'none' }}
         onChange={handleFileChange}
       />
@@ -90,7 +139,7 @@ const Candidates = () => {
           onClick={handleUploadClick}
           style={{ backgroundColor: '#2563eb', height: 40, paddingInline: 24 }}
         >
-          Upload Resume
+          Upload Resumes
         </Button>
       </div>
 
@@ -133,6 +182,7 @@ const Candidates = () => {
                       <Space size={8}>
                         <Button
                           size="small"
+                          onClick={() => handleViewProfile(candidate)}
                           style={{ borderColor: '#000', color: '#000', border: '1px solid #000', height: 32, background: 'transparent' }}
                         >
                           View Profile
@@ -168,6 +218,51 @@ const Candidates = () => {
           </div>
         </Spin>
       </Card>
+
+      {/* Profile Details Modal Screen */}
+      <Modal
+        title="Candidate Profile Details"
+        open={isModalOpen}
+        onCancel={handleCloseModal}
+        footer={[
+          <Button key="close" type="primary" onClick={handleCloseModal}>
+            Close
+          </Button>
+        ]}
+        width={700}
+        destroyOnClose
+      >
+        {selectedCandidate && (
+          <Descriptions bordered column={1} size="small" style={{ marginTop: 16 }}>
+            <Descriptions.Item label="Full Name">
+              <strong>{selectedCandidate.name || 'N/A'}</strong>
+            </Descriptions.Item>
+            <Descriptions.Item label="Email Address">
+              {selectedCandidate.email || 'N/A'}
+            </Descriptions.Item>
+            <Descriptions.Item label="Phone Number">
+              {selectedCandidate.phone || 'N/A'}
+            </Descriptions.Item>
+            <Descriptions.Item label="Source Document">
+              {selectedCandidate.source || 'N/A'}
+            </Descriptions.Item>
+            <Descriptions.Item label="Ingestion Date">
+              {selectedCandidate.date || 'N/A'}
+            </Descriptions.Item>
+            <Descriptions.Item label="Extracted Skills">
+              <Space size={[4, 8]} wrap>
+                {(selectedCandidate.skills || []).length > 0 ? (
+                  selectedCandidate.skills.map((skill) => (
+                    <Tag color="blue" key={skill}>{skill}</Tag>
+                  ))
+                ) : (
+                  <span style={{ color: '#9ca3af' }}>No parsed skills found</span>
+                )}
+              </Space>
+            </Descriptions.Item>
+          </Descriptions>
+        )}
+      </Modal>
     </>
   );
 };
