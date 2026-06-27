@@ -181,15 +181,15 @@ const Pipeline = ({ reqId = null }) => {
     persistStages(updated);
 
     // Dropping onto L1 → prompt to send exam invite
-    if (targetStage === 'l1' && currentExam) {
-      Modal.confirm({
-        title: `Send exam invite to ${candidate.name}?`,
-        content: `This will email the L1 assessment link to ${candidate.email || 'the candidate'}.`,
-        okText: 'Send Invite',
-        okButtonProps: { style: { backgroundColor: '#2563eb' } },
-        onOk: () => handleSendInvite(candidate),
-      });
-    }
+    // if (targetStage === 'l1' && currentExam) {
+    //   Modal.confirm({
+    //     title: `Send exam invite to ${candidate.name}?`,
+    //     content: `This will email the L1 assessment link to ${candidate.email || 'the candidate'}.`,
+    //     okText: 'Send Invite',
+    //     okButtonProps: { style: { backgroundColor: '#2563eb' } },
+    //     onOk: () => handleSendInvite(candidate),
+    //   });
+    // }
   };
 
   // True if a candidate already exists in any pipeline stage
