@@ -1,5 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { API_BASE_URL } from './config';
+import { useAuth, getStoredToken } from './auth/AuthContext';
+import LoginPage from './pages/LoginPage';
 import { 
   Layout, 
   Menu, 
@@ -28,13 +30,15 @@ import {
   ShopOutlined,
   SendOutlined,
   ThunderboltOutlined,
-  RobotOutlined
+  RobotOutlined,
+  TeamOutlined
 } from '@ant-design/icons';
 import Dashboard from './components/Dashboard';
 import Candidates from './components/Candidates';
 import Requirements from './components/Requirements';
 import Pipeline from './components/Pipeline';
 import Vendors from './components/Vendors';
+import InterviewPanel from './components/InterviewPanel';
 import Settings from './components/Settings';
 
 const { Header, Sider, Content } = Layout;
@@ -78,9 +82,13 @@ const ClaudeDrawer = ({ open, onClose }) => {
         .filter((m) => m.role !== 'system')
         .map((m) => ({ role: m.role, content: m.text }));
 
+      const token = getStoredToken();
       const res = await fetch(`${API_BASE_URL}/intelligence/chat`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({ history }),
       });
 
@@ -92,7 +100,8 @@ const ClaudeDrawer = ({ open, onClose }) => {
         ...prev,
         { id: Date.now() + 1, role: 'assistant', text: reply, ts: new Date() },
       ]);
-    } catch {
+    } catch (e){
+      console.error('Claude chat error:', e);
       setMessages((prev) => [
         ...prev,
         {
@@ -292,12 +301,23 @@ const ClaudeDrawer = ({ open, onClose }) => {
 // ─── Main App ────────────────────────────────────────────────────────────────
 
 const App = () => {
+  const { user, loading, isAuthenticated, logout, refreshSettings } = useAuth();
   const [collapsed, setCollapsed] = useState(false);
   const [selectedMenu, setSelectedMenu] = useState('1');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [region, setRegion] = useState('global');
   const [pipelineReqId, setPipelineReqId] = useState(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+
+  if (loading) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f0f4ff' }}>
+        <Spin size="large" tip="Loading…" />
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) return <LoginPage />;
 
   const handleViewPipeline = (reqId) => {
     setPipelineReqId(reqId);
@@ -317,13 +337,18 @@ const App = () => {
     '3': 'Job Requirements',
     '4': 'Pipelines',
     '5': 'Vendors',
+    '6': 'Interview Panel',
   };
 
   const userMenuItems = [
-    { key: 'profile', icon: <UserOutlined />, label: 'My Profile' },
+    { key: 'profile', icon: <UserOutlined />, label: user?.name ?? user?.email ?? 'My Profile', disabled: true },
     { type: 'divider' },
     { key: 'logout', icon: <LogoutOutlined />, label: 'Logout', danger: true },
   ];
+
+  const handleUserMenu = ({ key }) => {
+    if (key === 'logout') logout();
+  };
 
   const sidebarItems = [
     { key: '1', icon: <DashboardOutlined />, label: 'Dashboard' },
@@ -331,6 +356,7 @@ const App = () => {
     { key: '3', icon: <AppstoreOutlined />, label: 'Requirements' },
     { key: '4', icon: <ArrowUpOutlined />, label: 'Pipelines' },
     { key: '5', icon: <ShopOutlined />, label: 'Vendors' },
+    { key: '6', icon: <TeamOutlined />, label: 'Interview Panel' },
   ];
 
   return (
@@ -385,7 +411,7 @@ const App = () => {
         title="Settings"
         styles={{ body: { maxHeight: '75vh', overflowY: 'auto' } }}
       >
-        <Settings />
+        <Settings onSettingsChange={refreshSettings} />
       </Modal>
 
       {/* Claude Chat Drawer */}
@@ -428,9 +454,9 @@ const App = () => {
               onClick={() => setSettingsOpen(true)}
               icon={<SettingOutlined style={{ fontSize: 18 }} />}
             />
-            <Dropdown menu={{ items: userMenuItems }} placement="bottomRight" arrow>
+            <Dropdown menu={{ items: userMenuItems, onClick: handleUserMenu }} placement="bottomRight" arrow>
               <Space style={{ cursor: 'pointer' }}>
-                <Avatar style={{ backgroundColor: '#1890ff' }} icon={<UserOutlined />} size="large" />
+                <Avatar style={{ backgroundColor: '#2563eb' }} icon={<UserOutlined />} size="large" />
               </Space>
             </Dropdown>
           </Space>
@@ -440,8 +466,9 @@ const App = () => {
           {selectedMenu === '1' && <Dashboard />}
           {selectedMenu === '3' && <Requirements onViewPipeline={handleViewPipeline} />}
           {selectedMenu === '2' && <Candidates />}
-          {selectedMenu === '4' && <Pipeline reqId={pipelineReqId} />}
+          {selectedMenu === '4' && <Pipeline reqId={pipelineReqId} region={region} />}
           {selectedMenu === '5' && <Vendors />}
+          {selectedMenu === '6' && <InterviewPanel />}
         </Content>
       </Layout>
     </Layout>

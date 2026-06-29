@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import dayjs from 'dayjs';
-import { useGetRequirementsQuery, useAddRequirementMutation, useUpdateRequirementMutation } from '../redux/requirementsApi';
+import { useGetRequirementsQuery, useAddRequirementMutation, useUpdateRequirementMutation, useGetDepartmentsQuery } from '../redux/requirementsApi';
 import { useUploadResumeMutation,useGetAllCandidatesQuery } from '../redux/candidateApi';
 import { useLazyGetPipelineStagesQuery, useSavePipelineStagesMutation } from '../redux/pipelineStagesApi';
 import { useGetMarketIntelligenceMutation, useGenerateJobSummaryMutation } from '../redux/intelligenceApi';
@@ -77,6 +77,7 @@ const Requirements = ({ onViewPipeline }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const { data: requirements, error, isLoading, isFetching } = useGetRequirementsQuery();
+  const { data: departments = [] } = useGetDepartmentsQuery();
   // 3. Destructure the mutation trigger and its execution states
   const [addRequirement, { isLoading: isSubmitting }] = useAddRequirementMutation();
   const [updateRequirement] = useUpdateRequirementMutation();
@@ -599,12 +600,11 @@ const Requirements = ({ onViewPipeline }) => {
                 label="Department"
                 rules={[{ required: true, message: 'Please choose a department' }]}
               >
-                <Select placeholder="Select department" size="large">
-                  <Select.Option value="Engineering">Engineering</Select.Option>
-                  <Select.Option value="Product">Product Management</Select.Option>
-                  <Select.Option value="Data">Data Analytics</Select.Option>
-                  <Select.Option value="QA">Quality Assurance</Select.Option>
-                </Select>
+                <Select
+                    placeholder="Select department"
+                    size="large"
+                    options={departments.map((d) => ({ value: d.name, label: d.name }))}
+                  />
               </Form.Item>
             </Col>
             <Col span={12}>

@@ -1,9 +1,9 @@
-import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react';
-import { API_BASE_URL } from '../config';
+import { createApi } from '@reduxjs/toolkit/query/react';
+import { baseQueryWithAuth } from './baseQuery';
 
 export const pipelineApi = createApi({
   reducerPath: 'pipelineApi',
-  baseQuery: fetchBaseQuery({ baseUrl: API_BASE_URL }),
+  baseQuery: baseQueryWithAuth,
   tagTypes: ['Pipelines'], // 1. Main tag registration
   
 

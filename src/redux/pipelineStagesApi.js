@@ -1,10 +1,10 @@
-import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react';
-import { API_BASE_URL } from '../config';
+import { createApi } from '@reduxjs/toolkit/query/react';
+import { baseQueryWithAuth } from './baseQuery';
 
 // Persists the per-requirement pipeline stages (ingested / ranked / l1 / l2 / l3).
 export const pipelineStagesApi = createApi({
   reducerPath: 'pipelineStagesApi',
-  baseQuery: fetchBaseQuery({ baseUrl: API_BASE_URL }),
+  baseQuery: baseQueryWithAuth,
   tagTypes: ['PipelineStages'],
 
   endpoints: (builder) => ({

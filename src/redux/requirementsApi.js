@@ -1,12 +1,16 @@
-import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react';
-import { API_BASE_URL } from '../config';
+import { createApi } from '@reduxjs/toolkit/query/react';
+import { baseQueryWithAuth } from './baseQuery';
 
 export const requirementsApi = createApi({
   reducerPath: 'requirementsApi',
-  baseQuery: fetchBaseQuery({ baseUrl: API_BASE_URL }),
-  tagTypes: ['Requirement'], // 1. Main tag registration
+  baseQuery: baseQueryWithAuth,
+  tagTypes: ['Requirement', 'Department'],
 
   endpoints: (builder) => ({
+    getDepartments: builder.query({
+      query: () => '/requirements/departments',
+      providesTags: ['Department'],
+    }),
     // 1. Get all requirements
     getRequirements: builder.query({
       query: () => '/requirements',
@@ -45,4 +49,4 @@ export const requirementsApi = createApi({
   }),
 });
 
-export const { useGetRequirementsQuery, useGetRequirementDetailsQuery, useAddRequirementMutation, useUpdateRequirementMutation, useDeleteRequirementMutation } = requirementsApi;
+export const { useGetRequirementsQuery, useGetRequirementDetailsQuery, useAddRequirementMutation, useUpdateRequirementMutation, useDeleteRequirementMutation, useGetDepartmentsQuery } = requirementsApi;

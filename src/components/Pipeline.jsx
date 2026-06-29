@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Button, Card, Typography, Select, Drawer, Input, Empty, message, Dropdown, Modal, Radio, Space, Tooltip, Segmented, Tag } from 'antd';
-import { PlusOutlined, TeamOutlined, SearchOutlined, DownOutlined, FileAddOutlined, EyeOutlined, EditOutlined, DeleteOutlined, ShareAltOutlined, CopyOutlined, CompressOutlined, MailOutlined, CheckCircleOutlined, LinkOutlined } from '@ant-design/icons';
+import { PlusOutlined, TeamOutlined, SearchOutlined, DownOutlined, FileAddOutlined, EyeOutlined, EditOutlined, DeleteOutlined, ShareAltOutlined, CopyOutlined, CompressOutlined, MailOutlined, CheckCircleOutlined, LinkOutlined, CalendarOutlined } from '@ant-design/icons';
 import { useGetRequirementsQuery } from '../redux/requirementsApi';
 import { useGetPipelineStagesQuery, useSavePipelineStagesMutation } from '../redux/pipelineStagesApi';
 import { useGetAllCandidatesQuery } from '../redux/candidateApi';
@@ -11,6 +11,7 @@ import {
   useSendExamInviteMutation,
 } from '../redux/examApi';
 import { API_BASE_URL } from '../config';
+import ScheduleInterviewDrawer from './ScheduleInterviewDrawer';
 
 // The canonical empty pipeline — one array per stage.
 const EMPTY_STAGES = { ingested: [], ranked: [], l1: [], l2: [], l3: [] };
@@ -48,7 +49,7 @@ const SAMPLE_EXAM = {
 
 // Mock candidate database (would come from an API in production)
 
-const Pipeline = ({ reqId = null }) => {
+const Pipeline = ({ reqId = null, region = 'global' }) => {
   const { data: requirements, isLoading } = useGetRequirementsQuery();
   const { data: candidateList = [] } = useGetAllCandidatesQuery();
   const [selectedReqId, setSelectedReqId] = useState(reqId);
@@ -85,6 +86,10 @@ const Pipeline = ({ reqId = null }) => {
   const [sendExamInviteApi] = useSendExamInviteMutation();
   const [inviteModalOpen, setInviteModalOpen] = useState(false);
   const [inviteCandidate, setInviteCandidate] = useState(null);
+
+  // Schedule interview drawer
+  const [scheduleDrawerOpen, setScheduleDrawerOpen] = useState(false);
+  const [scheduleCandidate, setScheduleCandidate] = useState(null);
 
   // Populate the board whenever a new requirement's stages arrive (or none selected).
   useEffect(() => {
@@ -449,6 +454,28 @@ const Pipeline = ({ reqId = null }) => {
                         {stage.key === 'l1' && candidate.examInvited && candidate.examScore == null && (
                           <Tag color="orange" style={{ fontSize: 10, margin: 0 }}>Exam Sent</Tag>
                         )}
+                        {(stage.key === 'l2' || stage.key === 'l3') && (
+                          <Tooltip title={candidate.interviewData
+                            ? `Scheduled: ${new Date(candidate.interviewData.startISO).toLocaleString()} — click to reschedule`
+                            : 'Schedule Interview'
+                          }>
+                            <Button
+                              size="small"
+                              icon={<CalendarOutlined />}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setScheduleCandidate(candidate);
+                                setScheduleDrawerOpen(true);
+                              }}
+                              style={{
+                                fontSize: 10, height: 20, padding: '0 4px',
+                                ...(candidate.interviewData
+                                  ? { backgroundColor: '#2563eb', borderColor: '#2563eb', color: '#fff' }
+                                  : { borderColor: '#2563eb', color: '#2563eb' }),
+                              }}
+                            />
+                          </Tooltip>
+                        )}
                       </Space>
                     </div>
                   ) : (
@@ -483,6 +510,43 @@ const Pipeline = ({ reqId = null }) => {
                               style={{ fontSize: 11, height: 24 }}
                             >
                               Send Exam
+                            </Button>
+                          )}
+                        </div>
+                      )}
+                      {(stage.key === 'l2' || stage.key === 'l3') && (
+                        <div style={{ marginTop: 8, display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                          {candidate.interviewData ? (
+                            <>
+                              <Tooltip title={`Teams: ${candidate.interviewData.teamsLink ?? 'N/A'}`}>
+                                <Tag icon={<CalendarOutlined />} color="blue" style={{ fontSize: 11, cursor: 'default' }}>
+                                  Interview: {new Date(candidate.interviewData.startISO).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                                </Tag>
+                              </Tooltip>
+                              <Button
+                                size="small"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setScheduleCandidate(candidate);
+                                  setScheduleDrawerOpen(true);
+                                }}
+                                style={{ fontSize: 11, height: 24 }}
+                              >
+                                Reschedule
+                              </Button>
+                            </>
+                          ) : (
+                            <Button
+                              size="small"
+                              icon={<CalendarOutlined />}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setScheduleCandidate(candidate);
+                                setScheduleDrawerOpen(true);
+                              }}
+                              style={{ fontSize: 11, height: 24, borderColor: '#2563eb', color: '#2563eb' }}
+                            >
+                              Schedule Interview
                             </Button>
                           )}
                         </div>
@@ -561,6 +625,27 @@ const Pipeline = ({ reqId = null }) => {
           </div>
         )}
       </Drawer>
+
+      {/* --- Schedule Interview Drawer --- */}
+      <ScheduleInterviewDrawer
+        open={scheduleDrawerOpen}
+        onClose={() => { setScheduleDrawerOpen(false); setScheduleCandidate(null); }}
+        onScheduled={(interviewData) => {
+          if (!scheduleCandidate) return;
+          const updated = { ...pipelineData };
+          for (const stageKey of ['l2', 'l3']) {
+            updated[stageKey] = updated[stageKey].map((c) =>
+              String(c.id) === String(scheduleCandidate.id)
+                ? { ...c, interviewData }
+                : c
+            );
+          }
+          persistStages(updated);
+        }}
+        candidate={scheduleCandidate}
+        region={region}
+        requirement={(requirements ?? []).find((r) => String(r.id) === String(selectedReqId))}
+      />
 
       {/* --- Online Exam Modal (View / Edit) --- */}
       <Modal

@@ -28,115 +28,563 @@ import {
   LinkOutlined,
   SaveOutlined,
   ReloadOutlined,
-  EyeInvisibleOutlined,
-  EyeOutlined,
+  LockOutlined,
+  UserOutlined,
+  BellOutlined,
+  LinkedinOutlined,
 } from '@ant-design/icons';
 import settingsData from '../../settings.json';
+import { useAuth } from '../auth/AuthContext';
+import {
+  useGetSystemSettingsQuery,
+  useUpdateSystemSettingsMutation,
+  useGetUserSettingsQuery,
+  useUpdateUserSettingsMutation,
+} from '../redux/settingsApi';
 
 const { Title, Text, Paragraph } = Typography;
-const { Password } = Input;
 
-// Loads configuration from settings.json (cloned so edits don't mutate the import)
 const loadSettings = () =>
   new Promise((resolve) =>
     setTimeout(() => resolve(structuredClone(settingsData)), 400)
   );
 
-// ─── Job Board Card ───────────────────────────────────────────────────────────
-const boardMeta = {
-  linkedin: { label: 'LinkedIn', color: '#0A66C2', icon: '🔵' },
-  naukri: { label: 'Naukri', color: '#FF7555', icon: '🟠' },
-  monster: { label: 'Monster', color: '#6E34D5', icon: '🟣' },
-  indeed: { label: 'Indeed', color: '#003A9B', icon: '🔷' },
+// ─── Locked section placeholder shown to non-admins ──────────────────────────
+const AdminLockedCard = ({ title }) => (
+  <Card
+    style={{ borderRadius: 10, marginBottom: 16, borderColor: '#f0f0f0', background: '#fafafa' }}
+    bodyStyle={{ padding: '16px 20px' }}
+  >
+    <Space>
+      <LockOutlined style={{ color: '#bbb', fontSize: 16 }} />
+      <div>
+        <Text strong style={{ color: '#999' }}>{title}</Text>
+        <br />
+        <Text type="secondary" style={{ fontSize: 12 }}>
+          This section is managed by an administrator
+        </Text>
+      </div>
+      <Tag color="red" style={{ marginLeft: 8 }}>Admin Only</Tag>
+    </Space>
+  </Card>
+);
+
+// ─── SMTP card (admin) ────────────────────────────────────────────────────────
+const SmtpCard = () => {
+  const { data: sysData, isLoading } = useGetSystemSettingsQuery();
+  const [updateSystem, { isLoading: saving }] = useUpdateSystemSettingsMutation();
+  const [form] = Form.useForm();
+
+  useEffect(() => {
+    if (sysData?.smtp) form.setFieldsValue({
+      smtpHost: sysData.smtp.host,
+      smtpPort: sysData.smtp.port,
+      smtpUser: sysData.smtp.user,
+      smtpPass: sysData.smtp.pass,
+      smtpFrom: sysData.smtp.from,
+    });
+  }, [sysData]);
+
+  const onSave = async () => {
+    const v = form.getFieldsValue();
+    await updateSystem({
+      smtp: { host: v.smtpHost, port: v.smtpPort, user: v.smtpUser, pass: v.smtpPass, from: v.smtpFrom },
+    }).unwrap();
+    message.success('SMTP settings saved');
+  };
+
+  if (isLoading) return <Spin size="small" />;
+
+  return (
+    <Card
+      title={<Space><MailOutlined />SMTP Configuration <Tag color="red" style={{ fontSize: 10 }}>Admin Only</Tag></Space>}
+      style={{ borderRadius: 10, marginBottom: 16 }}
+      extra={<Button size="small" type="primary" icon={<SaveOutlined />} loading={saving} onClick={onSave} style={{ backgroundColor: '#2563eb' }}>Save SMTP</Button>}
+    >
+      <Form form={form} layout="vertical">
+        <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 16 }}>
+          <Form.Item name="smtpHost" label="Host" style={{ marginBottom: 0 }}><Input placeholder="smtp.gmail.com" /></Form.Item>
+          <Form.Item name="smtpPort" label="Port" style={{ marginBottom: 0 }}><InputNumber style={{ width: '100%' }} placeholder="587" /></Form.Item>
+          <Form.Item name="smtpUser" label="Username" style={{ marginBottom: 0 }}><Input placeholder="you@company.com" /></Form.Item>
+          <Form.Item name="smtpPass" label="Password" style={{ marginBottom: 0 }}><Input.Password /></Form.Item>
+        </div>
+        <Form.Item name="smtpFrom" label="From Address" style={{ marginBottom: 0, marginTop: 12 }}><Input placeholder="no-reply@company.com" /></Form.Item>
+      </Form>
+    </Card>
+  );
 };
 
-const JobBoardCard = ({ boardKey, config, onChange }) => {
-  const meta = boardMeta[boardKey];
-  const [showToken, setShowToken] = useState(false);
+// ─── Personal LinkedIn card (all users) ──────────────────────────────────────
+const PersonalLinkedInCard = () => {
+  const { data: userData } = useGetUserSettingsQuery();
+  const [updateUser, { isLoading: saving }] = useUpdateUserSettingsMutation();
+  const [form] = Form.useForm();
+
+  useEffect(() => {
+    if (userData?.personalLinkedin) form.setFieldsValue(userData.personalLinkedin);
+  }, [userData]);
+
+  const onSave = async () => {
+    const v = form.getFieldsValue();
+    await updateUser({ personalLinkedin: v }).unwrap();
+    message.success('Personal LinkedIn settings saved');
+  };
+
+  return (
+    <Card
+      title={<Space><LinkedinOutlined style={{ color: '#0A66C2' }} /><Text strong style={{ color: '#0A66C2' }}>Personal LinkedIn</Text><Tag color="blue" style={{ fontSize: 10 }}>Your Account</Tag></Space>}
+      style={{ borderRadius: 10, marginBottom: 20, borderColor: '#0A66C244' }}
+      extra={<Button size="small" type="primary" icon={<SaveOutlined />} loading={saving} onClick={onSave} style={{ backgroundColor: '#0A66C2' }}>Save</Button>}
+    >
+      <Paragraph type="secondary" style={{ fontSize: 13, marginBottom: 16 }}>
+        Connect your personal LinkedIn account to post messages and job openings directly from your recruiter profile.
+      </Paragraph>
+      <Form form={form} layout="vertical">
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+          <Form.Item name="enabled" valuePropName="checked" label={null} style={{ marginBottom: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Form.Item name="enabled" valuePropName="checked" noStyle><Switch /></Form.Item>
+              <Text>Enable personal LinkedIn posting</Text>
+            </div>
+          </Form.Item>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginTop: 12 }}>
+          <Form.Item name="clientId" label="Client ID" style={{ marginBottom: 0 }}><Input placeholder="LinkedIn App Client ID" /></Form.Item>
+          <Form.Item name="clientSecret" label="Client Secret" style={{ marginBottom: 0 }}><Input.Password placeholder="LinkedIn App Client Secret" /></Form.Item>
+          <Form.Item name="accessToken" label="Access Token" style={{ marginBottom: 0, gridColumn: '1 / -1' }}>
+            <Input.Password placeholder="OAuth 2.0 access token from LinkedIn" />
+          </Form.Item>
+        </div>
+      </Form>
+    </Card>
+  );
+};
+
+// Board metadata
+const BOARD_META = {
+  linkedinCompany: { label: 'LinkedIn (Company Posts)', color: '#0A66C2', icon: '🔵', desc: 'Post company updates and articles to your LinkedIn company page' },
+  linkedinJobs: { label: 'LinkedIn (Job Postings)', color: '#0A66C2', icon: '💼', desc: 'Publish job openings directly to LinkedIn Jobs' },
+  monster: { label: 'Monster', color: '#6E34D5', icon: '🟣', desc: 'Post job listings to Monster.com' },
+  naukri: { label: 'Naukri', color: '#FF7555', icon: '🟠', desc: 'Post job listings to Naukri.com' },
+  indeed: { label: 'Indeed', color: '#003A9B', icon: '🔷', desc: 'Sponsor and post jobs on Indeed' },
+};
+
+const BOARD_KEYS = ['linkedinCompany', 'linkedinJobs', 'monster', 'naukri', 'indeed'];
+
+// Admin view: full credentials + enable toggle
+const AdminBoardCard = ({ boardKey, config = {}, onSave }) => {
+  const meta = BOARD_META[boardKey];
+  const [form] = Form.useForm();
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (config) form.setFieldsValue(config);
+  }, [config]);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await onSave(boardKey, form.getFieldsValue());
+      message.success(`${meta.label} settings saved`);
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <Card
       style={{
         borderRadius: 10,
         border: `1.5px solid ${config.enabled ? meta.color + '55' : '#e8e8e8'}`,
-        transition: 'border 0.2s',
         marginBottom: 16,
+        transition: 'border 0.2s',
       }}
       bodyStyle={{ padding: '16px 20px' }}
     >
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <Space>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
+        <Space align="start">
           <span style={{ fontSize: 20 }}>{meta.icon}</span>
-          <Text strong style={{ fontSize: 15, color: meta.color }}>
-            {meta.label}
-          </Text>
-          <Badge
-            status={config.enabled ? 'success' : 'default'}
-            text={
-              <Text type={config.enabled ? 'success' : 'secondary'} style={{ fontSize: 12 }}>
-                {config.enabled ? 'Active' : 'Disabled'}
-              </Text>
-            }
-          />
+          <div>
+            <Text strong style={{ fontSize: 15, color: meta.color }}>{meta.label}</Text>
+            <br />
+            <Text type="secondary" style={{ fontSize: 12 }}>{meta.desc}</Text>
+          </div>
         </Space>
-        <Switch
-          checked={config.enabled}
-          onChange={(val) => onChange(boardKey, 'enabled', val)}
-          checkedChildren="ON"
-          unCheckedChildren="OFF"
-          style={{ backgroundColor: config.enabled ? meta.color : undefined }}
-        />
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-        <Form.Item label="API Token" style={{ marginBottom: 0 }}>
-          <Input.Password
-            disabled={!config.enabled}
-            value={config.apiToken}
-            placeholder="Enter API token"
-            onChange={(e) => onChange(boardKey, 'apiToken', e.target.value)}
-            visibilityToggle
-          />
-        </Form.Item>
-
-        <Form.Item label="Sync Interval (mins)" style={{ marginBottom: 0 }}>
-          <InputNumber
-            disabled={!config.enabled}
-            min={15}
-            max={1440}
-            value={config.syncInterval}
-            onChange={(val) => onChange(boardKey, 'syncInterval', val)}
-            style={{ width: '100%' }}
-          />
-        </Form.Item>
-      </div>
-
-      <div style={{ marginTop: 12 }}>
         <Space>
-          <Text type="secondary" style={{ fontSize: 13 }}>
-            Auto-post new openings:
-          </Text>
-          <Switch
-            size="small"
-            disabled={!config.enabled}
-            checked={config.autoPost}
-            onChange={(val) => onChange(boardKey, 'autoPost', val)}
-          />
-          {config.enabled && (
-            <Tooltip title="Test connection">
-              <Button size="small" icon={<LinkOutlined />} type="link">
-                Test Connection
-              </Button>
-            </Tooltip>
-          )}
+          <Badge status={config.enabled ? 'success' : 'default'} text={<Text type={config.enabled ? 'success' : 'secondary'} style={{ fontSize: 12 }}>{config.enabled ? 'Active' : 'Disabled'}</Text>} />
+          <Form form={form}>
+            <Form.Item name="enabled" valuePropName="checked" noStyle>
+              <Switch
+                checkedChildren="ON"
+                unCheckedChildren="OFF"
+                style={{ backgroundColor: config.enabled ? meta.color : undefined }}
+              />
+            </Form.Item>
+          </Form>
         </Space>
       </div>
+
+      <Form form={form} layout="vertical">
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          {(boardKey === 'linkedinCompany') && (
+            <>
+              <Form.Item name="accessToken" label="Access Token" style={{ marginBottom: 0 }}><Input.Password placeholder="OAuth access token" /></Form.Item>
+              <Form.Item name="organizationId" label="Organization ID" style={{ marginBottom: 0 }}><Input placeholder="LinkedIn Org ID" /></Form.Item>
+            </>
+          )}
+          {(boardKey === 'linkedinJobs') && (
+            <>
+              <Form.Item name="clientId" label="Client ID" style={{ marginBottom: 0 }}><Input placeholder="LinkedIn App Client ID" /></Form.Item>
+              <Form.Item name="clientSecret" label="Client Secret" style={{ marginBottom: 0 }}><Input.Password /></Form.Item>
+              <Form.Item name="organizationId" label="Organization ID" style={{ marginBottom: 0 }}><Input placeholder="LinkedIn Org ID" /></Form.Item>
+            </>
+          )}
+          {(boardKey === 'monster' || boardKey === 'indeed') && (
+            <Form.Item name="apiToken" label="API Token / Key" style={{ marginBottom: 0, gridColumn: '1 / -1' }}><Input.Password placeholder="API key" /></Form.Item>
+          )}
+          {boardKey === 'naukri' && (
+            <>
+              <Form.Item name="username" label="Username" style={{ marginBottom: 0 }}><Input /></Form.Item>
+              <Form.Item name="password" label="Password" style={{ marginBottom: 0 }}><Input.Password /></Form.Item>
+              <Form.Item name="apiToken" label="API Token" style={{ marginBottom: 0, gridColumn: '1 / -1' }}><Input.Password /></Form.Item>
+            </>
+          )}
+          {boardKey === 'indeed' && (
+            <Form.Item name="publisherId" label="Publisher ID" style={{ marginBottom: 0 }}><Input /></Form.Item>
+          )}
+        </div>
+        <div style={{ marginTop: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Space>
+            <Text type="secondary" style={{ fontSize: 13 }}>Auto-post new openings:</Text>
+            <Form.Item name="autoPost" valuePropName="checked" noStyle><Switch size="small" /></Form.Item>
+          </Space>
+          <Button size="small" type="primary" icon={<SaveOutlined />} loading={saving} onClick={handleSave} style={{ backgroundColor: meta.color, borderColor: meta.color }}>
+            Save
+          </Button>
+        </div>
+      </Form>
     </Card>
   );
 };
 
+// Recruiter view: enable/disable only, credentials locked
+const RecruiterBoardToggle = ({ boardKey, sysConfig = {}, userEnabled, onChange }) => {
+  const meta = BOARD_META[boardKey];
+  const systemEnabled = sysConfig.enabled ?? false;
+
+  return (
+    <div style={{
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      padding: '12px 16px',
+      borderRadius: 10,
+      border: '1px solid #f0f0f0',
+      marginBottom: 10,
+      background: systemEnabled ? '#fafafa' : '#f5f5f5',
+      opacity: systemEnabled ? 1 : 0.6,
+    }}>
+      <Space>
+        <span style={{ fontSize: 18 }}>{meta.icon}</span>
+        <div>
+          <Text strong style={{ color: systemEnabled ? meta.color : '#999' }}>{meta.label}</Text>
+          {!systemEnabled && (
+            <><br /><Text type="secondary" style={{ fontSize: 11 }}>Not enabled by admin</Text></>
+          )}
+        </div>
+      </Space>
+      <Space>
+        {systemEnabled && (
+          <Tooltip title="Toggle whether your job postings are sent to this platform">
+            <Switch
+              size="small"
+              checked={userEnabled}
+              onChange={onChange}
+              checkedChildren="Post"
+              unCheckedChildren="Skip"
+            />
+          </Tooltip>
+        )}
+        <Tooltip title="Credentials are configured by the administrator">
+          <LockOutlined style={{ color: '#ccc', fontSize: 13 }} />
+        </Tooltip>
+      </Space>
+    </div>
+  );
+};
+
+// ─── Job Boards Tab ───────────────────────────────────────────────────────────
+const JobBoardsTab = ({ isAdmin }) => {
+  const { data: sysData, isLoading: sysLoading } = useGetSystemSettingsQuery();
+  const [updateSystem] = useUpdateSystemSettingsMutation();
+  const { data: userData, isLoading: userLoading } = useGetUserSettingsQuery();
+  const [updateUser, { isLoading: savingUser }] = useUpdateUserSettingsMutation();
+
+  const jobBoards = sysData?.jobBoards ?? {};
+  const toggles = userData?.jobBoardToggles ?? {};
+
+  const handleAdminSaveBoard = async (boardKey, values) => {
+    await updateSystem({ jobBoards: { ...jobBoards, [boardKey]: { ...jobBoards[boardKey], ...values } } }).unwrap();
+  };
+
+  const handleToggle = async (boardKey, val) => {
+    await updateUser({ jobBoardToggles: { ...toggles, [boardKey]: val } }).unwrap();
+  };
+
+  if (sysLoading || userLoading) return <Spin tip="Loading…" />;
+
+  return (
+    <div style={{ maxWidth: 700 }}>
+      <Title level={5} style={{ marginBottom: 4 }}>Job Board Integrations</Title>
+      <Text type="secondary" style={{ display: 'block', marginBottom: 24 }}>
+        Connect job portals to automatically distribute open positions
+      </Text>
+
+      {/* Personal LinkedIn — available to all users */}
+      <PersonalLinkedInCard />
+
+      <Divider orientation="left" style={{ marginBottom: 16 }}>
+        <Space>
+          <GlobalOutlined />
+          <Text strong>Company Platforms</Text>
+          {!isAdmin && <Tag color="orange" style={{ fontSize: 10 }}>Configured by Admin</Tag>}
+        </Space>
+      </Divider>
+
+      {isAdmin ? (
+        <>
+          <Alert
+            type="warning"
+            showIcon
+            message="Admin credentials — these are company-wide settings visible only to admins"
+            style={{ marginBottom: 16, borderRadius: 8 }}
+          />
+          {BOARD_KEYS.map((key) => (
+            <AdminBoardCard
+              key={key}
+              boardKey={key}
+              config={jobBoards[key]}
+              onSave={handleAdminSaveBoard}
+            />
+          ))}
+        </>
+      ) : (
+        <>
+          <Text type="secondary" style={{ fontSize: 13, display: 'block', marginBottom: 12 }}>
+            Choose which platforms your job postings are sent to. Platforms must be enabled by an admin before they can be used.
+          </Text>
+          {BOARD_KEYS.map((key) => (
+            <RecruiterBoardToggle
+              key={key}
+              boardKey={key}
+              sysConfig={jobBoards[key]}
+              userEnabled={toggles[key] ?? false}
+              onChange={(val) => handleToggle(key, val)}
+            />
+          ))}
+          <Button
+            type="primary"
+            icon={<SaveOutlined />}
+            loading={savingUser}
+            onClick={async () => { await updateUser({ jobBoardToggles: toggles }).unwrap(); message.success('Preferences saved'); }}
+            style={{ backgroundColor: '#2563eb', marginTop: 8 }}
+          >
+            Save Preferences
+          </Button>
+        </>
+      )}
+    </div>
+  );
+};
+
+// ─── System Settings Tab (admin only) ────────────────────────────────────────
+const SystemSettingsTab = () => {
+  const { data: sysData, isLoading } = useGetSystemSettingsQuery();
+  const [updateSystem, { isLoading: saving }] = useUpdateSystemSettingsMutation();
+  const [form] = Form.useForm();
+
+  useEffect(() => {
+    if (sysData) form.setFieldsValue({
+      companyName: sysData.companyName,
+      defaultTimezone: sysData.defaultTimezone,
+      anthropicApiKey: sysData.anthropicApiKey,
+      mseTenantId: sysData.msGraph?.tenantId,
+      mseClientId: sysData.msGraph?.clientId,
+      mseClientSecret: sysData.msGraph?.clientSecret,
+      mseOrganizerEmail: sysData.msGraph?.organizerEmail,
+      cognitoUserPoolId: sysData.cognito?.userPoolId,
+      cognitoClientId: sysData.cognito?.clientId,
+      cognitoRegion: sysData.cognito?.region,
+    });
+  }, [sysData]);
+
+  const onSave = async () => {
+    const v = form.getFieldsValue();
+    await updateSystem({
+      companyName: v.companyName,
+      defaultTimezone: v.defaultTimezone,
+      anthropicApiKey: v.anthropicApiKey,
+      msGraph: { tenantId: v.mseTenantId, clientId: v.mseClientId, clientSecret: v.mseClientSecret, organizerEmail: v.mseOrganizerEmail },
+      cognito: { userPoolId: v.cognitoUserPoolId, clientId: v.cognitoClientId, region: v.cognitoRegion },
+    }).unwrap();
+    message.success('System settings saved');
+  };
+
+  if (isLoading) return <Spin tip="Loading system settings…" />;
+
+  return (
+    <div style={{ maxWidth: 700 }}>
+      <Alert type="warning" showIcon message="Admin Only" description="These settings affect all users and contain sensitive credentials. Handle with care." style={{ marginBottom: 20 }} />
+      <Form form={form} layout="vertical">
+        <Card title="General" style={{ borderRadius: 10, marginBottom: 16 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+            <Form.Item name="companyName" label="Company Name"><Input /></Form.Item>
+            <Form.Item name="defaultTimezone" label="Default Timezone">
+              <Select options={[
+                { value: 'America/New_York', label: 'EST (New York)' },
+                { value: 'America/Los_Angeles', label: 'PST (Los Angeles)' },
+                { value: 'UTC', label: 'UTC' },
+                { value: 'Asia/Kolkata', label: 'IST (Kolkata)' },
+                { value: 'Europe/London', label: 'GMT (London)' },
+              ]} />
+            </Form.Item>
+          </div>
+        </Card>
+
+        <Card title={<Space><RobotOutlined />Anthropic / AI</Space>} style={{ borderRadius: 10, marginBottom: 16 }}>
+          <Form.Item name="anthropicApiKey" label="Anthropic API Key">
+            <Input.Password placeholder="sk-ant-api03-…" />
+          </Form.Item>
+        </Card>
+
+        <Card title={<Space><GlobalOutlined />Microsoft Graph (Teams Interviews)</Space>} style={{ borderRadius: 10, marginBottom: 16 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+            <Form.Item name="mseTenantId" label="Tenant ID"><Input placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" /></Form.Item>
+            <Form.Item name="mseClientId" label="Client ID"><Input /></Form.Item>
+            <Form.Item name="mseClientSecret" label="Client Secret"><Input.Password /></Form.Item>
+            <Form.Item name="mseOrganizerEmail" label="Organizer Email"><Input placeholder="ats@company.com" /></Form.Item>
+          </div>
+        </Card>
+
+        <Card title={<Space><LockOutlined />AWS Cognito</Space>} style={{ borderRadius: 10, marginBottom: 16 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+            <Form.Item name="cognitoUserPoolId" label="User Pool ID"><Input placeholder="us-east-1_xxxxxxxxx" /></Form.Item>
+            <Form.Item name="cognitoClientId" label="App Client ID"><Input /></Form.Item>
+            <Form.Item name="cognitoRegion" label="Region"><Input placeholder="us-east-1" /></Form.Item>
+          </div>
+          <Alert type="info" message="Restart the backend server after changing Cognito settings." style={{ marginTop: 8 }} />
+        </Card>
+
+        <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={onSave} style={{ backgroundColor: '#2563eb' }}>
+          Save System Settings
+        </Button>
+      </Form>
+    </div>
+  );
+};
+
+// ─── User Preferences Tab ─────────────────────────────────────────────────────
+const UserSettingsTab = ({ onSettingsChange }) => {
+  const { data: userData, isLoading } = useGetUserSettingsQuery();
+  const [updateUser, { isLoading: saving }] = useUpdateUserSettingsMutation();
+  const [form] = Form.useForm();
+
+  useEffect(() => {
+    if (userData) form.setFieldsValue({
+      timezone: userData.timezone,
+      language: userData.language,
+      compactMode: userData.compactMode,
+      examSubmitted: userData.emailNotifications?.examSubmitted,
+      interviewScheduled: userData.emailNotifications?.interviewScheduled,
+      candidateMoved: userData.emailNotifications?.candidateMoved,
+      dailyDigest: userData.emailNotifications?.dailyDigest,
+    });
+  }, [userData]);
+
+  const onSave = async () => {
+    const v = form.getFieldsValue();
+    await updateUser({
+      timezone: v.timezone,
+      language: v.language,
+      compactMode: v.compactMode,
+      emailNotifications: {
+        examSubmitted: v.examSubmitted,
+        interviewScheduled: v.interviewScheduled,
+        candidateMoved: v.candidateMoved,
+        dailyDigest: v.dailyDigest,
+      },
+    }).unwrap();
+    message.success('Preferences saved');
+    onSettingsChange?.();
+  };
+
+  if (isLoading) return <Spin tip="Loading preferences…" />;
+
+  const notifItems = [
+    { key: 'examSubmitted', label: 'Exam submitted', desc: 'When a candidate completes their online assessment' },
+    { key: 'interviewScheduled', label: 'Interview scheduled', desc: 'Confirmation when a Teams meeting is created' },
+    { key: 'candidateMoved', label: 'Candidate stage change', desc: 'When a candidate is moved between pipeline stages' },
+    { key: 'dailyDigest', label: 'Daily digest', desc: 'Morning summary of pipeline activity' },
+  ];
+
+  return (
+    <div style={{ maxWidth: 620 }}>
+      <Form form={form} layout="vertical">
+        <Card title={<Space><UserOutlined />Regional Preferences</Space>} style={{ borderRadius: 10, marginBottom: 16 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+            <Form.Item name="timezone" label="My Timezone">
+              <Select options={[
+                { value: 'America/New_York', label: 'EST (New York)' },
+                { value: 'America/Chicago', label: 'CST (Chicago)' },
+                { value: 'America/Los_Angeles', label: 'PST (Los Angeles)' },
+                { value: 'UTC', label: 'UTC' },
+                { value: 'Asia/Kolkata', label: 'IST (Kolkata)' },
+                { value: 'Asia/Dubai', label: 'GST (Dubai)' },
+                { value: 'Europe/London', label: 'GMT (London)' },
+              ]} />
+            </Form.Item>
+            <Form.Item name="language" label="Language">
+              <Select options={[
+                { value: 'en', label: 'English' },
+                { value: 'es', label: 'Spanish' },
+                { value: 'fr', label: 'French' },
+              ]} />
+            </Form.Item>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 8 }}>
+            <div>
+              <Text strong>Compact pipeline cards</Text>
+              <br />
+              <Text type="secondary" style={{ fontSize: 12 }}>Show condensed candidate cards in the Kanban board</Text>
+            </div>
+            <Form.Item name="compactMode" valuePropName="checked" noStyle><Switch /></Form.Item>
+          </div>
+        </Card>
+
+        <Card title={<Space><BellOutlined />Email Notifications</Space>} style={{ borderRadius: 10, marginBottom: 16 }}>
+          {notifItems.map(({ key, label, desc }) => (
+            <div key={key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid #f5f5f5' }}>
+              <div>
+                <Text strong style={{ fontSize: 13 }}>{label}</Text>
+                <br />
+                <Text type="secondary" style={{ fontSize: 12 }}>{desc}</Text>
+              </div>
+              <Form.Item name={key} valuePropName="checked" noStyle><Switch /></Form.Item>
+            </div>
+          ))}
+        </Card>
+
+        <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={onSave} style={{ backgroundColor: '#2563eb' }}>
+          Save My Preferences
+        </Button>
+      </Form>
+    </div>
+  );
+};
+
 // ─── Main Settings Component ──────────────────────────────────────────────────
-const Settings = () => {
+const Settings = ({ onSettingsChange }) => {
+  const { isAdmin } = useAuth();
   const [settings, setSettings] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -161,8 +609,6 @@ const Settings = () => {
     setDirty(true);
   };
 
-  const handleJobBoardChange = (board, field, value) => update(`jobBoards.${board}.${field}`, value);
-
   const handleSave = async () => {
     setSaving(true);
     await new Promise((r) => setTimeout(r, 900));
@@ -177,7 +623,7 @@ const Settings = () => {
     setSettings(data);
     setLoading(false);
     setDirty(false);
-    message.info('Settings reloaded from file');
+    message.info('Settings reloaded');
   };
 
   if (loading) {
@@ -189,27 +635,30 @@ const Settings = () => {
   }
 
   const tabItems = [
-    // ── Email ──────────────────────────────────────────────────────────────────
+    // My Preferences
+    {
+      key: 'myPreferences',
+      label: <Space><UserOutlined />My Preferences</Space>,
+      children: <UserSettingsTab onSettingsChange={onSettingsChange} />,
+    },
+
+    // Email
     {
       key: 'email',
       label: (
         <Space>
           <MailOutlined />
           Email
-          {settings.email.enabled ? (
-            <CheckCircleOutlined style={{ color: '#52c41a', fontSize: 12 }} />
-          ) : (
-            <CloseCircleOutlined style={{ color: '#bbb', fontSize: 12 }} />
-          )}
+          {settings.email.enabled
+            ? <CheckCircleOutlined style={{ color: '#52c41a', fontSize: 12 }} />
+            : <CloseCircleOutlined style={{ color: '#bbb', fontSize: 12 }} />}
         </Space>
       ),
       children: (
         <div style={{ maxWidth: 680 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
             <div>
-              <Title level={5} style={{ margin: 0 }}>
-                Email Communication
-              </Title>
+              <Title level={5} style={{ margin: 0 }}>Email Communication</Title>
               <Text type="secondary">Configure outbound email for candidate notifications</Text>
             </div>
             <Space>
@@ -223,61 +672,12 @@ const Settings = () => {
             </Space>
           </div>
 
-          <Card style={{ borderRadius: 10, marginBottom: 16 }}>
-            <Title level={5} style={{ marginTop: 0 }}>
-              SMTP Configuration
-            </Title>
-            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 16 }}>
-              <Form.Item label="SMTP Host" style={{ marginBottom: 0 }}>
-                <Input
-                  disabled={!settings.email.enabled}
-                  value={settings.email.smtpHost}
-                  onChange={(e) => update('email.smtpHost', e.target.value)}
-                />
-              </Form.Item>
-              <Form.Item label="Port" style={{ marginBottom: 0 }}>
-                <InputNumber
-                  disabled={!settings.email.enabled}
-                  value={settings.email.smtpPort}
-                  onChange={(v) => update('email.smtpPort', v)}
-                  style={{ width: '100%' }}
-                />
-              </Form.Item>
-              <Form.Item label="From Address" style={{ marginBottom: 0 }}>
-                <Input
-                  disabled={!settings.email.enabled}
-                  value={settings.email.fromAddress}
-                  onChange={(e) => update('email.fromAddress', e.target.value)}
-                />
-              </Form.Item>
-              <Form.Item label="Reply-To" style={{ marginBottom: 0 }}>
-                <Input
-                  disabled={!settings.email.enabled}
-                  value={settings.email.replyTo}
-                  onChange={(e) => update('email.replyTo', e.target.value)}
-                />
-              </Form.Item>
-            </div>
-            <div style={{ marginTop: 16 }}>
-              <Space>
-                <Text>Use TLS/SSL:</Text>
-                <Switch
-                  size="small"
-                  disabled={!settings.email.enabled}
-                  checked={settings.email.useTLS}
-                  onChange={(v) => update('email.useTLS', v)}
-                />
-                <Tag color={settings.email.useTLS ? 'green' : 'default'}>
-                  {settings.email.useTLS ? 'Secure' : 'Plain'}
-                </Tag>
-              </Space>
-            </div>
-          </Card>
+          {/* SMTP — admin only */}
+          {isAdmin ? <SmtpCard /> : <AdminLockedCard title="SMTP Configuration" />}
 
+          {/* Email Templates — all users */}
           <Card style={{ borderRadius: 10 }}>
-            <Title level={5} style={{ marginTop: 0 }}>
-              Email Templates
-            </Title>
+            <Title level={5} style={{ marginTop: 0 }}>Email Templates</Title>
             <Paragraph type="secondary" style={{ fontSize: 13 }}>
               Choose which automated emails are sent to candidates
             </Paragraph>
@@ -289,23 +689,9 @@ const Settings = () => {
                 applicationConfirmation: 'Application Confirmation',
               };
               return (
-                <div
-                  key={key}
-                  style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    padding: '10px 0',
-                    borderBottom: '1px solid #f0f0f0',
-                  }}
-                >
+                <div key={key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid #f0f0f0' }}>
                   <Text>{labels[key]}</Text>
-                  <Switch
-                    size="small"
-                    disabled={!settings.email.enabled}
-                    checked={val}
-                    onChange={(v) => update(`email.templates.${key}`, v)}
-                  />
+                  <Switch size="small" disabled={!settings.email.enabled} checked={val} onChange={(v) => update(`email.templates.${key}`, v)} />
                 </div>
               );
             })}
@@ -314,46 +700,21 @@ const Settings = () => {
       ),
     },
 
-    // ── Job Boards ─────────────────────────────────────────────────────────────
+    // Job Boards
     {
       key: 'jobBoards',
-      label: (
-        <Space>
-          <GlobalOutlined />
-          Job Boards
-        </Space>
-      ),
-      children: (
-        <div style={{ maxWidth: 680 }}>
-          <div style={{ marginBottom: 20 }}>
-            <Title level={5} style={{ margin: 0 }}>
-              Job Board Integrations
-            </Title>
-            <Text type="secondary">Enable and configure external job portals for sourcing candidates</Text>
-          </div>
-
-          {Object.entries(settings.jobBoards).map(([key, cfg]) => (
-            <JobBoardCard key={key} boardKey={key} config={cfg} onChange={handleJobBoardChange} />
-          ))}
-        </div>
-      ),
+      label: <Space><GlobalOutlined />Job Boards</Space>,
+      children: <JobBoardsTab isAdmin={isAdmin} />,
     },
 
-    // ── AI Settings ───────────────────────────────────────────────────────────
+    // AI / LLM
     {
       key: 'ai',
-      label: (
-        <Space>
-          <RobotOutlined />
-          AI / LLM
-        </Space>
-      ),
+      label: <Space><RobotOutlined />AI / LLM</Space>,
       children: (
         <div style={{ maxWidth: 680 }}>
           <div style={{ marginBottom: 20 }}>
-            <Title level={5} style={{ margin: 0 }}>
-              AI & Language Model Settings
-            </Title>
+            <Title level={5} style={{ margin: 0 }}>AI & Language Model Settings</Title>
             <Text type="secondary">Control AI-powered features and token usage</Text>
           </div>
 
@@ -371,76 +732,30 @@ const Settings = () => {
                   style={{ width: '100%' }}
                 />
               </Form.Item>
-
-              <Form.Item
-                label={
-                  <Space>
-                    Token Limit
-                    <Tooltip title="Max tokens per AI request. Higher = more detailed output, higher cost.">
-                      <Text type="secondary" style={{ fontSize: 11 }}>
-                        ⓘ
-                      </Text>
-                    </Tooltip>
-                  </Space>
-                }
-                style={{ marginBottom: 0 }}
-              >
-                <InputNumber
-                  min={256}
-                  max={8192}
-                  step={256}
-                  value={settings.aiSettings.tokenLimit}
-                  onChange={(v) => update('aiSettings.tokenLimit', v)}
-                  style={{ width: '100%' }}
-                  formatter={(v) => `${v} tokens`}
-                  parser={(v) => parseInt(v.replace(' tokens', ''), 10)}
-                />
+              <Form.Item label="Token Limit" style={{ marginBottom: 0 }}>
+                <InputNumber min={256} max={8192} step={256} value={settings.aiSettings.tokenLimit} onChange={(v) => update('aiSettings.tokenLimit', v)} style={{ width: '100%' }} formatter={(v) => `${v} tokens`} parser={(v) => parseInt(v.replace(' tokens', ''), 10)} />
               </Form.Item>
-
               <Form.Item label="Temperature (creativity)" style={{ marginBottom: 0 }}>
-                <InputNumber
-                  min={0}
-                  max={1}
-                  step={0.1}
-                  value={settings.aiSettings.temperature}
-                  onChange={(v) => update('aiSettings.temperature', v)}
-                  style={{ width: '100%' }}
-                />
+                <InputNumber min={0} max={1} step={0.1} value={settings.aiSettings.temperature} onChange={(v) => update('aiSettings.temperature', v)} style={{ width: '100%' }} />
               </Form.Item>
             </div>
           </Card>
 
           <Card style={{ borderRadius: 10 }}>
-            <Title level={5} style={{ marginTop: 0 }}>
-              Feature Toggles
-            </Title>
+            <Title level={5} style={{ marginTop: 0 }}>Feature Toggles</Title>
             {[
               { key: 'enableResumeScreening', label: 'AI Resume Screening', desc: 'Auto-score resumes against JD' },
               { key: 'enableJdGeneration', label: 'JD Generation', desc: 'Generate job descriptions with AI' },
               { key: 'enableCandidateSummary', label: 'Candidate Summary', desc: 'Auto-summarise candidate profiles' },
               { key: 'enableExamGeneration', label: 'Generate Exam', desc: 'Auto-Generate L1 Exam' },
             ].map(({ key, label, desc }) => (
-              <div
-                key={key}
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  padding: '12px 0',
-                  borderBottom: '1px solid #f0f0f0',
-                }}
-              >
+              <div key={key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 0', borderBottom: '1px solid #f0f0f0' }}>
                 <div>
                   <Text strong>{label}</Text>
                   <br />
-                  <Text type="secondary" style={{ fontSize: 12 }}>
-                    {desc}
-                  </Text>
+                  <Text type="secondary" style={{ fontSize: 12 }}>{desc}</Text>
                 </div>
-                <Switch
-                  checked={settings.aiSettings[key]}
-                  onChange={(v) => update(`aiSettings.${key}`, v)}
-                />
+                <Switch checked={settings.aiSettings[key]} onChange={(v) => update(`aiSettings.${key}`, v)} />
               </div>
             ))}
           </Card>
@@ -448,127 +763,25 @@ const Settings = () => {
       ),
     },
 
-    // ── General ───────────────────────────────────────────────────────────────
-    {
-      key: 'general',
-      label: (
-        <Space>
-          <SettingOutlined />
-          General
-        </Space>
-      ),
-      children: (
-        <div style={{ maxWidth: 680 }}>
-          <div style={{ marginBottom: 20 }}>
-            <Title level={5} style={{ margin: 0 }}>
-              General Settings
-            </Title>
-            <Text type="secondary">Regional, session, and file upload preferences</Text>
-          </div>
-
-          <Card style={{ borderRadius: 10 }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-              <Form.Item label="Timezone" style={{ marginBottom: 0 }}>
-                <Select
-                  value={settings.general.timezone}
-                  onChange={(v) => update('general.timezone', v)}
-                  options={[
-                    { value: 'Asia/Kolkata', label: 'IST (Asia/Kolkata)' },
-                    { value: 'UTC', label: 'UTC' },
-                    { value: 'America/New_York', label: 'EST (New York)' },
-                    { value: 'Europe/London', label: 'GMT (London)' },
-                  ]}
-                  style={{ width: '100%' }}
-                />
-              </Form.Item>
-
-              <Form.Item label="Date Format" style={{ marginBottom: 0 }}>
-                <Select
-                  value={settings.general.dateFormat}
-                  onChange={(v) => update('general.dateFormat', v)}
-                  options={[
-                    { value: 'DD/MM/YYYY', label: 'DD/MM/YYYY' },
-                    { value: 'MM/DD/YYYY', label: 'MM/DD/YYYY' },
-                    { value: 'YYYY-MM-DD', label: 'YYYY-MM-DD' },
-                  ]}
-                  style={{ width: '100%' }}
-                />
-              </Form.Item>
-
-              <Form.Item label="Session Timeout (mins)" style={{ marginBottom: 0 }}>
-                <InputNumber
-                  min={5}
-                  max={480}
-                  value={settings.general.sessionTimeout}
-                  onChange={(v) => update('general.sessionTimeout', v)}
-                  style={{ width: '100%' }}
-                />
-              </Form.Item>
-
-              <Form.Item label="Max Upload Size (MB)" style={{ marginBottom: 0 }}>
-                <InputNumber
-                  min={1}
-                  max={50}
-                  value={settings.general.maxUploadSizeMB}
-                  onChange={(v) => update('general.maxUploadSizeMB', v)}
-                  style={{ width: '100%' }}
-                />
-              </Form.Item>
-            </div>
-
-            <Divider style={{ margin: '16px 0' }} />
-
-            <Form.Item label="Allowed Resume File Types" style={{ marginBottom: 0 }}>
-              <Select
-                mode="multiple"
-                value={settings.general.allowedFileTypes}
-                onChange={(v) => update('general.allowedFileTypes', v)}
-                options={['pdf', 'doc', 'docx', 'txt', 'rtf'].map((t) => ({ value: t, label: `.${t}` }))}
-                style={{ width: '100%' }}
-              />
-            </Form.Item>
-          </Card>
-        </div>
-      ),
-    },
+    // System Settings (admin only)
+    ...(isAdmin ? [{
+      key: 'systemSettings',
+      label: <Space><LockOutlined /><span>System Settings</span><Tag color="red" style={{ fontSize: 10, marginLeft: 0 }}>Admin</Tag></Space>,
+      children: <SystemSettingsTab />,
+    }] : []),
   ];
 
   return (
     <div style={{ padding: '4px 0' }}>
-      {/* Header row */}
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'flex-start',
-          marginBottom: 24,
-        }}
-      >
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24 }}>
         <div>
-          <Title level={4} style={{ margin: 0 }}>
-            Configuration
-          </Title>
+          <Title level={4} style={{ margin: 0 }}>Configuration</Title>
           <Text type="secondary">Manage your ATS integrations and system preferences</Text>
         </div>
         <Space>
-          {dirty && (
-            <Alert
-              message="Unsaved changes"
-              type="warning"
-              showIcon
-              style={{ padding: '2px 12px', borderRadius: 6 }}
-            />
-          )}
-          <Button icon={<ReloadOutlined />} onClick={handleReset}>
-            Reset
-          </Button>
-          <Button
-            type="primary"
-            icon={<SaveOutlined />}
-            loading={saving}
-            onClick={handleSave}
-            disabled={!dirty}
-          >
+          {dirty && <Alert message="Unsaved changes" type="warning" showIcon style={{ padding: '2px 12px', borderRadius: 6 }} />}
+          <Button icon={<ReloadOutlined />} onClick={handleReset}>Reset</Button>
+          <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={handleSave} disabled={!dirty}>
             Save Changes
           </Button>
         </Space>

@@ -4,6 +4,8 @@ import { candidateApi } from './candidateApi';
 import { pipelineStagesApi } from './pipelineStagesApi';
 import { intelligenceApi } from './intelligenceApi';
 import { examApi } from './examApi';
+import { interviewApi } from './interviewApi';
+import { settingsApi } from './settingsApi';
 
 export const store = configureStore({
   reducer: {
@@ -12,6 +14,8 @@ export const store = configureStore({
     [pipelineStagesApi.reducerPath]: pipelineStagesApi.reducer,
     [intelligenceApi.reducerPath]: intelligenceApi.reducer,
     [examApi.reducerPath]: examApi.reducer,
+    [interviewApi.reducerPath]: interviewApi.reducer,
+    [settingsApi.reducerPath]: settingsApi.reducer,
   },
   middleware: (getDefaultMiddleware) =>
     getDefaultMiddleware().concat(
@@ -20,5 +24,7 @@ export const store = configureStore({
       pipelineStagesApi.middleware,
       intelligenceApi.middleware,
       examApi.middleware,
+      interviewApi.middleware,
+      settingsApi.middleware,
     ),
 });
