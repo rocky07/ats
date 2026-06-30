@@ -312,16 +312,14 @@ const Pipeline = ({ reqId = null, region = 'global' }) => {
 
   const examMenuItems = [
     { key: 'generate', icon: <FileAddOutlined />, label: currentExam ? 'Regenerate Exam' : 'Generate Exam' },
-    { key: 'view', icon: <EyeOutlined />, label: 'Preview Exam', disabled: !currentExam },
     { key: 'link', icon: <LinkOutlined />, label: 'Copy Exam Link', disabled: !currentExam },
     { type: 'divider' },
     { key: 'delete', icon: <DeleteOutlined />, label: 'Delete Exam', danger: true, disabled: !currentExam },
   ];
 
-  // A posting is treated as open unless its isClosed flag is true
-  const isOpenPosting = (req) => !req.isClosed;
+  const isOpenPosting = (req) => (req.status ?? 'open') === 'open';
   const visibleRequirements = (requirements ?? []).filter(
-    (req) => showAllPostings || isOpenPosting(req) || req.id === selectedReqId
+    (req) => showAllPostings || isOpenPosting(req) || String(req.id) === String(selectedReqId)
   );
 
   const filteredDb = candidateList.filter((c) => {

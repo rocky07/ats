@@ -6,6 +6,8 @@ import { intelligenceApi } from './intelligenceApi';
 import { examApi } from './examApi';
 import { interviewApi } from './interviewApi';
 import { settingsApi } from './settingsApi';
+import { vendorApi } from './vendorApi';
+import { dashboardApi } from './dashboardApi';
 
 export const store = configureStore({
   reducer: {
@@ -16,6 +18,8 @@ export const store = configureStore({
     [examApi.reducerPath]: examApi.reducer,
     [interviewApi.reducerPath]: interviewApi.reducer,
     [settingsApi.reducerPath]: settingsApi.reducer,
+    [vendorApi.reducerPath]: vendorApi.reducer,
+    [dashboardApi.reducerPath]: dashboardApi.reducer,
   },
   middleware: (getDefaultMiddleware) =>
     getDefaultMiddleware().concat(
@@ -26,5 +30,7 @@ export const store = configureStore({
       examApi.middleware,
       interviewApi.middleware,
       settingsApi.middleware,
+      vendorApi.middleware,
+      dashboardApi.middleware,
     ),
 });

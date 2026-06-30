@@ -1,83 +1,239 @@
 import React, { useState } from 'react';
-import { Button, Card, Input, Space, Table, Tag, Modal, Upload, Typography, message, Segmented, List, Empty } from 'antd';
-import { SearchOutlined, ImportOutlined, InboxOutlined, PlusOutlined, DeleteOutlined, AppstoreOutlined } from '@ant-design/icons';
+import {
+  Button, Card, Input, Space, Table, Tag, Modal, Upload, Typography,
+  message, Segmented, List, Empty, Select, Popconfirm, Spin,
+} from 'antd';
+import {
+  SearchOutlined, ImportOutlined, InboxOutlined, PlusOutlined,
+  DeleteOutlined, AppstoreOutlined, EditOutlined, CheckOutlined, CloseOutlined,
+} from '@ant-design/icons';
+import {
+  useGetVendorsQuery, useCreateVendorMutation, useUpdateVendorMutation,
+  useDeleteVendorMutation, useBulkImportVendorsMutation,
+  useGetGroupsQuery, useCreateGroupMutation, useUpdateGroupMutation, useDeleteGroupMutation,
+} from '../redux/vendorApi';
 
 const { Text } = Typography;
-
 const ALL_VENDORS = 'All Vendors';
-
-// Mock vendor data (would come from an API in production)
-const INITIAL_VENDORS = [
-  { id: 1, name: 'John Carter', email: 'john.carter@techstaff.com', company: 'TechStaff Solutions', status: 'Active', group: 'IT Recruiters' },
-  { id: 2, name: 'Aisha Rahman', email: 'aisha@globalhire.com', company: 'GlobalHire Inc.', status: 'Active', group: 'Preferred Partners' },
-  { id: 3, name: 'Miguel Santos', email: 'miguel.santos@nexustalent.com', company: 'Nexus Talent', status: 'Pending', group: 'IT Recruiters' },
-  { id: 4, name: 'Wei Chen', email: 'wei.chen@brightpath.io', company: 'BrightPath Consulting', status: 'Inactive', group: 'Logistics' },
-  { id: 5, name: 'Olivia Brown', email: 'olivia.brown@apexvendors.com', company: 'Apex Vendors', status: 'Active', group: 'Preferred Partners' },
-];
-
-const DEFAULT_GROUPS = ['Preferred Partners', 'IT Recruiters', 'Logistics'];
-
 const STATUS_COLORS = { Active: 'green', Pending: 'gold', Inactive: 'default' };
+const STATUS_OPTIONS = ['Active', 'Pending', 'Inactive'];
+
+// ── Inline-editable cell helpers ──────────────────────────────────────────────
+
+const StatusCell = ({ vendor, onSave }) => {
+  const [editing, setEditing] = useState(false);
+  const [val, setVal]         = useState(vendor.status);
+
+  const save = async (newVal) => {
+    setVal(newVal);
+    setEditing(false);
+    await onSave({ id: vendor.id, status: newVal });
+  };
+
+  if (editing) {
+    return (
+      <Select
+        value={val}
+        size="small"
+        autoFocus
+        style={{ width: 110 }}
+        options={STATUS_OPTIONS.map((s) => ({ value: s, label: s }))}
+        onChange={save}
+        onBlur={() => setEditing(false)}
+      />
+    );
+  }
+  return (
+    <Tag
+      color={STATUS_COLORS[vendor.status]}
+      style={{ cursor: 'pointer' }}
+      onClick={() => setEditing(true)}
+    >
+      {vendor.status}
+    </Tag>
+  );
+};
+
+const GroupCell = ({ vendor, groups, onSave }) => {
+  const [editing, setEditing] = useState(false);
+  const [val, setVal]         = useState(vendor.group ?? null);
+
+  const save = async (newVal) => {
+    setVal(newVal);
+    setEditing(false);
+    await onSave({ id: vendor.id, group: newVal });
+  };
+
+  if (editing) {
+    return (
+      <Select
+        value={val}
+        size="small"
+        autoFocus
+        allowClear
+        placeholder="None"
+        style={{ width: 160 }}
+        options={groups.map((g) => ({ value: g, label: g }))}
+        onChange={save}
+        onClear={() => save(null)}
+        onBlur={() => setEditing(false)}
+      />
+    );
+  }
+  return (
+    <span style={{ cursor: 'pointer' }} onClick={() => setEditing(true)}>
+      {vendor.group
+        ? <Tag color="blue">{vendor.group}</Tag>
+        : <Text type="secondary" style={{ fontSize: 12 }}>— click to assign</Text>}
+    </span>
+  );
+};
+
+// ── Main Component ────────────────────────────────────────────────────────────
 
 const Vendors = () => {
-  const [vendors, setVendors] = useState(INITIAL_VENDORS);
-  const [search, setSearch] = useState('');
-  const [importOpen, setImportOpen] = useState(false);
-  const [groups, setGroups] = useState(DEFAULT_GROUPS);
-  const [activeTab, setActiveTab] = useState(ALL_VENDORS);
-  const [manageOpen, setManageOpen] = useState(false);
-  const [newGroup, setNewGroup] = useState('');
+  const [search,      setSearch]      = useState('');
+  const [activeTab,   setActiveTab]   = useState(ALL_VENDORS);
+  const [importOpen,  setImportOpen]  = useState(false);
+  const [manageOpen,  setManageOpen]  = useState(false);
+  const [newGroup,    setNewGroup]    = useState('');
+  const [editingGroup, setEditingGroup] = useState(null); // { name, draft }
+
+  const { data: vendors  = [], isLoading: loadingVendors } = useGetVendorsQuery();
+  const { data: groups   = [], isLoading: loadingGroups  } = useGetGroupsQuery();
+
+  const [updateVendor]      = useUpdateVendorMutation();
+  const [deleteVendor]      = useDeleteVendorMutation();
+  const [bulkImport]        = useBulkImportVendorsMutation();
+  const [createGroup]       = useCreateGroupMutation();
+  const [updateGroup]       = useUpdateGroupMutation();
+  const [deleteGroup]       = useDeleteGroupMutation();
+
+  // ── Filtering ──────────────────────────────────────────────────────────────
 
   const filtered = vendors.filter((v) => {
-    // Group tab filter
     if (activeTab !== ALL_VENDORS && v.group !== activeTab) return false;
-    // Search filter
     const q = search.trim().toLowerCase();
     if (!q) return true;
     return (
       v.name.toLowerCase().includes(q) ||
-      v.email.toLowerCase().includes(q) ||
-      v.company.toLowerCase().includes(q)
+      (v.email ?? '').toLowerCase().includes(q) ||
+      (v.phone ?? '').includes(q) ||
+      (v.company ?? '').toLowerCase().includes(q)
     );
   });
 
-  // True if any vendor is currently assigned to the group
-  const isGroupInUse = (group) => vendors.some((v) => v.group === group);
+  // ── Inline save ───────────────────────────────────────────────────────────
 
-  const handleAddGroup = () => {
+  const handleCellSave = async (patch) => {
+    try {
+      await updateVendor(patch).unwrap();
+    } catch {
+      message.error('Failed to save change');
+    }
+  };
+
+  // ── Group management ──────────────────────────────────────────────────────
+
+  const handleAddGroup = async () => {
     const name = newGroup.trim();
     if (!name) return;
-    if (name === ALL_VENDORS || groups.some((g) => g.toLowerCase() === name.toLowerCase())) {
-      message.info(`Group "${name}" already exists`);
-      return;
+    try {
+      await createGroup(name).unwrap();
+      setNewGroup('');
+      message.success(`Group "${name}" added`);
+    } catch (e) {
+      message.error(e?.data?.error ?? 'Failed to add group');
     }
-    setGroups((prev) => [...prev, name]);
-    setNewGroup('');
-    message.success(`Group "${name}" added`);
   };
 
-  const handleDeleteGroup = (group) => {
-    if (isGroupInUse(group)) {
-      message.warning(`"${group}" is in use and cannot be deleted`);
-      return;
+  const handleRenameGroup = async (oldName) => {
+    const newName = editingGroup?.draft?.trim();
+    if (!newName || newName === oldName) { setEditingGroup(null); return; }
+    try {
+      await updateGroup({ oldName, newName }).unwrap();
+      if (activeTab === oldName) setActiveTab(newName);
+      setEditingGroup(null);
+      message.success(`Renamed to "${newName}"`);
+    } catch (e) {
+      message.error(e?.data?.error ?? 'Failed to rename group');
     }
-    setGroups((prev) => prev.filter((g) => g !== group));
-    if (activeTab === group) setActiveTab(ALL_VENDORS);
-    message.success(`Group "${group}" deleted`);
   };
 
-  // Simulate importing contacts from an uploaded file (CSV/vCard export from Microsoft)
+  const handleDeleteGroup = async (name) => {
+    try {
+      await deleteGroup(name).unwrap();
+      if (activeTab === name) setActiveTab(ALL_VENDORS);
+      message.success(`Group "${name}" deleted`);
+    } catch (e) {
+      message.error(e?.data?.error ?? 'Group is in use — reassign vendors first');
+    }
+  };
+
+  // ── CSV import ────────────────────────────────────────────────────────────
+
+  const parseOutlookCsv = (text) => {
+    const lines = text.split(/\r?\n/).filter((l) => l.trim());
+    if (lines.length < 2) return [];
+
+    const parseLine = (line) => {
+      const fields = [];
+      let cur = '';
+      let inQuote = false;
+      for (let i = 0; i < line.length; i++) {
+        const ch = line[i];
+        if (ch === '"') { inQuote = !inQuote; continue; }
+        if (ch === ',' && !inQuote) { fields.push(cur); cur = ''; continue; }
+        cur += ch;
+      }
+      fields.push(cur);
+      return fields;
+    };
+
+    const headers = parseLine(lines[0]).map((h) => h.trim());
+    const idx = (name) => headers.indexOf(name);
+
+    const iFirstName  = idx('First Name');
+    const iMiddleName = idx('Middle Name');
+    const iLastName   = idx('Last Name');
+    const iEmail      = idx('E-mail Address');
+    const iEmail2     = idx('E-mail 2 Address');
+    const iBusinessPh = idx('Business Phone');
+    const iMobilePh   = idx('Mobile Phone');
+    const iCompany    = idx('Company');
+
+    const contacts = [];
+    for (let i = 1; i < lines.length; i++) {
+      const f = parseLine(lines[i]);
+      const parts = [f[iFirstName], f[iMiddleName], f[iLastName]].filter(Boolean);
+      const name    = parts.join(' ').trim();
+      const email   = (f[iEmail] ?? f[iEmail2] ?? '').trim();
+      const phone   = (f[iBusinessPh] ?? f[iMobilePh] ?? '').trim();
+      const company = (f[iCompany] ?? '').trim();
+      if (!name && !email) continue;
+      contacts.push({ name: name || email, email, phone, company });
+    }
+    return contacts;
+  };
+
   const handleImportFile = (file) => {
-    const baseId = Date.now();
-    const imported = [
-      { id: baseId + 1, name: 'Imported Contact 1', email: 'contact1@outlook.com', company: 'Microsoft Import', status: 'Pending' },
-      { id: baseId + 2, name: 'Imported Contact 2', email: 'contact2@outlook.com', company: 'Microsoft Import', status: 'Pending' },
-    ];
-    setVendors((prev) => [...imported, ...prev]);
-    message.success(`${file.name} imported — ${imported.length} contacts added`);
-    setImportOpen(false);
-    return false; // prevent antd from actually uploading
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      const contacts = parseOutlookCsv(e.target.result);
+      if (!contacts.length) { message.warning('No valid contacts found'); return; }
+      try {
+        await bulkImport(contacts).unwrap();
+        message.success(`${file.name} imported — ${contacts.length} contact(s) added`);
+        setImportOpen(false);
+      } catch {
+        message.error('Import failed');
+      }
+    };
+    reader.readAsText(file);
+    return false;
   };
+
+  // ── Table columns ─────────────────────────────────────────────────────────
 
   const columns = [
     {
@@ -86,29 +242,44 @@ const Vendors = () => {
       sorter: (a, b) => a.name.localeCompare(b.name),
       render: (name) => <Text strong>{name}</Text>,
     },
-    { title: 'Email', dataIndex: 'email' },
-    {
-      title: 'Company',
-      dataIndex: 'company',
-      sorter: (a, b) => a.company.localeCompare(b.company),
-    },
+    { title: 'Email', dataIndex: 'email', render: (v) => v || <Text type="secondary">—</Text> },
+    { title: 'Phone', dataIndex: 'phone', render: (v) => v || <Text type="secondary">—</Text> },
+    { title: 'Company', dataIndex: 'company', sorter: (a, b) => (a.company ?? '').localeCompare(b.company ?? ''), render: (v) => v || <Text type="secondary">—</Text> },
     {
       title: 'Group',
       dataIndex: 'group',
-      render: (group) => (group ? <Tag color="blue">{group}</Tag> : <Text type="secondary">—</Text>),
+      render: (_, record) => (
+        <GroupCell vendor={record} groups={groups} onSave={handleCellSave} />
+      ),
     },
     {
       title: 'Status',
       dataIndex: 'status',
-      filters: [
-        { text: 'Active', value: 'Active' },
-        { text: 'Pending', value: 'Pending' },
-        { text: 'Inactive', value: 'Inactive' },
-      ],
+      filters: STATUS_OPTIONS.map((s) => ({ text: s, value: s })),
       onFilter: (value, record) => record.status === value,
-      render: (status) => <Tag color={STATUS_COLORS[status]}>{status}</Tag>,
+      render: (_, record) => (
+        <StatusCell vendor={record} onSave={handleCellSave} />
+      ),
+    },
+    {
+      title: '',
+      key: 'actions',
+      width: 48,
+      render: (_, record) => (
+        <Popconfirm
+          title="Delete this vendor?"
+          onConfirm={async () => {
+            try { await deleteVendor(record.id).unwrap(); message.success('Vendor deleted'); }
+            catch { message.error('Failed to delete'); }
+          }}
+        >
+          <Button type="text" danger icon={<DeleteOutlined />} size="small" />
+        </Popconfirm>
+      ),
     },
   ];
+
+  if (loadingVendors) return <Spin />;
 
   return (
     <>
@@ -119,7 +290,7 @@ const Vendors = () => {
           onChange={setActiveTab}
           options={[ALL_VENDORS, ...groups]}
         />
-        <Button icon={<PlusOutlined />} onClick={() => setManageOpen(true)}>
+        <Button icon={<AppstoreOutlined />} onClick={() => setManageOpen(true)}>
           Manage Groups
         </Button>
       </div>
@@ -127,7 +298,7 @@ const Vendors = () => {
       {/* Action Bar */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, gap: 12, flexWrap: 'wrap' }}>
         <Input
-          placeholder="Search vendors by name, email or company"
+          placeholder="Search by name, email, phone or company"
           style={{ width: 400, borderRadius: 4 }}
           prefix={<SearchOutlined />}
           allowClear
@@ -154,7 +325,7 @@ const Vendors = () => {
         />
       </Card>
 
-      {/* Import Contacts Modal */}
+      {/* Import Modal */}
       <Modal
         title="Import Microsoft Contacts"
         open={importOpen}
@@ -162,17 +333,10 @@ const Vendors = () => {
         footer={<Button onClick={() => setImportOpen(false)}>Cancel</Button>}
         destroyOnClose
       >
-        <Upload.Dragger
-          multiple={false}
-          showUploadList={false}
-          accept=".csv,.vcf"
-          beforeUpload={handleImportFile}
-        >
+        <Upload.Dragger multiple={false} showUploadList={false} accept=".csv" beforeUpload={handleImportFile}>
           <p className="ant-upload-drag-icon"><InboxOutlined /></p>
-          <p className="ant-upload-text">Click or drag a contacts file here to import</p>
-          <p className="ant-upload-hint">
-            Export your contacts from Microsoft (Outlook / People) as CSV or vCard (.vcf), then drop the file here.
-          </p>
+          <p className="ant-upload-text">Click or drag a contacts CSV here</p>
+          <p className="ant-upload-hint">Export from Outlook / Microsoft People as CSV, then drop the file here.</p>
         </Upload.Dragger>
       </Modal>
 
@@ -196,7 +360,7 @@ const Vendors = () => {
           </Button>
         </Space.Compact>
 
-        {groups.length === 0 ? (
+        {loadingGroups ? <Spin /> : groups.length === 0 ? (
           <Empty description="No custom groups" image={Empty.PRESENTED_IMAGE_SIMPLE} />
         ) : (
           <List
@@ -204,24 +368,39 @@ const Vendors = () => {
             bordered
             dataSource={groups}
             renderItem={(group) => {
-              const inUse = isGroupInUse(group);
+              const isEditing = editingGroup?.name === group;
+              const inUse = vendors.some((v) => v.group === group);
               return (
                 <List.Item
-                  actions={[
-                    <Button
-                      key="delete"
-                      type="text"
-                      danger
-                      icon={<DeleteOutlined />}
-                      disabled={inUse}
-                      title={inUse ? 'Group is in use and cannot be deleted' : 'Delete group'}
-                      onClick={() => handleDeleteGroup(group)}
-                    />,
+                  actions={isEditing ? [
+                    <Button key="ok" type="text" icon={<CheckOutlined />} onClick={() => handleRenameGroup(group)} />,
+                    <Button key="cancel" type="text" icon={<CloseOutlined />} onClick={() => setEditingGroup(null)} />,
+                  ] : [
+                    <Button key="edit" type="text" icon={<EditOutlined />} onClick={() => setEditingGroup({ name: group, draft: group })} />,
+                    <Popconfirm
+                      key="del"
+                      title={inUse ? 'This group has vendors. Reassign them first.' : `Delete "${group}"?`}
+                      onConfirm={() => !inUse && handleDeleteGroup(group)}
+                      okButtonProps={{ disabled: inUse }}
+                    >
+                      <Button type="text" danger icon={<DeleteOutlined />} />
+                    </Popconfirm>,
                   ]}
                 >
                   <Space>
                     <AppstoreOutlined />
-                    {group}
+                    {isEditing ? (
+                      <Input
+                        size="small"
+                        value={editingGroup.draft}
+                        onChange={(e) => setEditingGroup((prev) => ({ ...prev, draft: e.target.value }))}
+                        onPressEnter={() => handleRenameGroup(group)}
+                        autoFocus
+                        style={{ width: 180 }}
+                      />
+                    ) : (
+                      group
+                    )}
                     {inUse && <Tag color="default">in use</Tag>}
                   </Space>
                 </List.Item>
