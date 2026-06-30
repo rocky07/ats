@@ -34,7 +34,7 @@ import {
   LinkedinOutlined,
 } from '@ant-design/icons';
 import settingsData from '../../settings.json';
-import { useAuth } from '../auth/AuthContext';
+import { useAuth, getStoredToken } from '../auth/AuthContext';
 import {
   useGetSystemSettingsQuery,
   useUpdateSystemSettingsMutation,
@@ -116,46 +116,104 @@ const SmtpCard = () => {
 
 // ─── Personal LinkedIn card (all users) ──────────────────────────────────────
 const PersonalLinkedInCard = () => {
-  const { data: userData } = useGetUserSettingsQuery();
-  const [updateUser, { isLoading: saving }] = useUpdateUserSettingsMutation();
-  const [form] = Form.useForm();
+  const { data: userData, refetch } = useGetUserSettingsQuery();
+  const [updateUser, { isLoading: disconnecting }] = useUpdateUserSettingsMutation();
+  const li = userData?.personalLinkedin ?? {};
+  const isConnected = !!(li.enabled && li.accessToken && li.linkedinUrn);
+  const tokenExpired = li.tokenExpiry && Date.now() > li.tokenExpiry;
 
+  // Check for ?linkedin= query param on mount (redirect back from OAuth)
   useEffect(() => {
-    if (userData?.personalLinkedin) form.setFieldsValue(userData.personalLinkedin);
-  }, [userData]);
+    const params = new URLSearchParams(window.location.search);
+    const status = params.get('linkedin');
+    if (status === 'connected') {
+      message.success('LinkedIn account connected successfully!');
+      refetch();
+      // Clean URL
+      window.history.replaceState({}, '', window.location.pathname);
+    } else if (status === 'denied') {
+      message.warning('LinkedIn authorization was cancelled.');
+      window.history.replaceState({}, '', window.location.pathname);
+    } else if (status === 'error') {
+      message.error('LinkedIn connection failed. Please try again.');
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  }, []);
 
-  const onSave = async () => {
-    const v = form.getFieldsValue();
-    await updateUser({ personalLinkedin: v }).unwrap();
-    message.success('Personal LinkedIn settings saved');
+  const handleConnect = () => {
+    // Pass token as query param since browser navigation can't set headers
+    const token = getStoredToken() ?? '';
+    window.location.href = `${import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000/api'}/auth/linkedin?token=${encodeURIComponent(token)}`;
+  };
+
+  const handleDisconnect = async () => {
+    try {
+      await fetch(`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000/api'}/auth/linkedin`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${getStoredToken() ?? ''}` },
+      });
+      await refetch();
+      message.success('LinkedIn account disconnected');
+    } catch {
+      message.error('Failed to disconnect');
+    }
   };
 
   return (
     <Card
       title={<Space><LinkedinOutlined style={{ color: '#0A66C2' }} /><Text strong style={{ color: '#0A66C2' }}>Personal LinkedIn</Text><Tag color="blue" style={{ fontSize: 10 }}>Your Account</Tag></Space>}
       style={{ borderRadius: 10, marginBottom: 20, borderColor: '#0A66C244' }}
-      extra={<Button size="small" type="primary" icon={<SaveOutlined />} loading={saving} onClick={onSave} style={{ backgroundColor: '#0A66C2' }}>Save</Button>}
     >
       <Paragraph type="secondary" style={{ fontSize: 13, marginBottom: 16 }}>
-        Connect your personal LinkedIn account to post messages and job openings directly from your recruiter profile.
+        Connect your personal LinkedIn account to auto-post new job openings to your LinkedIn feed with a public apply link.
+        Candidates who apply will land directly in the ingested pipeline stage.
       </Paragraph>
-      <Form form={form} layout="vertical">
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-          <Form.Item name="enabled" valuePropName="checked" label={null} style={{ marginBottom: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Form.Item name="enabled" valuePropName="checked" noStyle><Switch /></Form.Item>
-              <Text>Enable personal LinkedIn posting</Text>
-            </div>
-          </Form.Item>
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginTop: 12 }}>
-          <Form.Item name="clientId" label="Client ID" style={{ marginBottom: 0 }}><Input placeholder="LinkedIn App Client ID" /></Form.Item>
-          <Form.Item name="clientSecret" label="Client Secret" style={{ marginBottom: 0 }}><Input.Password placeholder="LinkedIn App Client Secret" /></Form.Item>
-          <Form.Item name="accessToken" label="Access Token" style={{ marginBottom: 0, gridColumn: '1 / -1' }}>
-            <Input.Password placeholder="OAuth 2.0 access token from LinkedIn" />
-          </Form.Item>
-        </div>
-      </Form>
+
+      {isConnected && !tokenExpired ? (
+        <Space direction="vertical" style={{ width: '100%' }}>
+          <Alert
+            type="success"
+            icon={<CheckCircleOutlined />}
+            showIcon
+            message={
+              <Space>
+                <Text strong>Connected as {li.linkedinName || li.linkedinEmail}</Text>
+                {li.connectedAt && (
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    since {new Date(li.connectedAt).toLocaleDateString()}
+                  </Text>
+                )}
+              </Space>
+            }
+          />
+          <Space>
+            <Button danger onClick={handleDisconnect} loading={disconnecting} size="small">
+              Disconnect LinkedIn
+            </Button>
+            <Button onClick={handleConnect} size="small">
+              Re-authenticate
+            </Button>
+          </Space>
+        </Space>
+      ) : (
+        <Space direction="vertical" style={{ width: '100%' }}>
+          {tokenExpired && (
+            <Alert type="warning" showIcon message="Your LinkedIn token has expired. Please reconnect." style={{ marginBottom: 8 }} />
+          )}
+          <Button
+            type="primary"
+            icon={<LinkedinOutlined />}
+            onClick={handleConnect}
+            style={{ backgroundColor: '#0A66C2', borderColor: '#0A66C2' }}
+          >
+            Connect with LinkedIn
+          </Button>
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            You'll be redirected to LinkedIn to authorize this app. Make sure your LinkedIn app has the{' '}
+            <Text code style={{ fontSize: 12 }}>w_member_social</Text> scope enabled.
+          </Text>
+        </Space>
+      )}
     </Card>
   );
 };
