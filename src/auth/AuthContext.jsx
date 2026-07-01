@@ -80,7 +80,7 @@ export function AuthProvider({ children }) {
         body: JSON.stringify({
           cognitoSub: payload.sub,
           email: payload.email,
-          name: payload.name ?? payload['cognito:username'],
+          name: payload.name || payload.email || payload['cognito:username'],
           groups: payload['cognito:groups'] ?? [],
         }),
       });
