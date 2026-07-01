@@ -27,7 +27,8 @@ const ACTIVITY_ICONS = {
 const Dashboard = () => {
   const { data, isLoading, isError } = useGetDashboardQuery(undefined, { pollingInterval: 30000 });
 
-  if (isLoading) {
+  // First-ever load with no cached data yet
+  if (isLoading && !data) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 400 }}>
         <Spin size="large" tip="Loading dashboard…" />
@@ -35,8 +36,9 @@ const Dashboard = () => {
     );
   }
 
-  if (isError || !data) {
-    return <Alert type="error" message="Failed to load dashboard data" style={{ margin: 24 }} />;
+  // No data at all (never loaded successfully) — hard error
+  if (!data) {
+    return <Alert type="error" message="Failed to load dashboard data. Make sure the backend is running." style={{ margin: 24 }} />;
   }
 
   const { kpis, sourcingData, funnelData, qualityData, recentActivity } = data;
@@ -104,6 +106,18 @@ const Dashboard = () => {
 
   return (
     <Row gutter={[24, 24]} style={{ width: '100%', padding: '16px' }}>
+      {/* Stale-data warning — only shown when a background poll fails but we still have data */}
+      {isError && (
+        <Col span={24}>
+          <Alert
+            type="warning"
+            message="Could not reach the server — showing last known data. Dashboard will refresh automatically when the connection is restored."
+            closable
+            showIcon
+            style={{ marginBottom: 0 }}
+          />
+        </Col>
+      )}
       {/* KPI Cards */}
       {kpiCards.map((kpi) => (
         <Col key={kpi.title} xs={24} md={6}>

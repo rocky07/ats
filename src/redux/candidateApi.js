@@ -42,6 +42,10 @@ export const candidateApi = createApi({
       }),
       invalidatesTags: ['Candidates'], // Invalidate the 'Candidates' tag to refetch the list after deletion
     }),
+    // Fetch a presigned S3 download URL for a candidate's resume.
+    getResumeUrl: builder.query({
+      query: (candidateId) => `/candidates/${candidateId}/resume`,
+    }),
     // Upload a resume file; the backend parses it and creates a candidate.
     uploadResume: builder.mutation({
       query: (file) => {
@@ -58,4 +62,4 @@ export const candidateApi = createApi({
   }),
 });
 
-export const { useGetAllCandidatesQuery, useGetCandidatesDetailsQuery, useAddCandidateMutation, useEditCandidateMutation, useDeleteCandidateMutation, useUploadResumeMutation } = candidateApi;
+export const { useGetAllCandidatesQuery, useGetCandidatesDetailsQuery, useAddCandidateMutation, useEditCandidateMutation, useDeleteCandidateMutation, useUploadResumeMutation, useGetResumeUrlQuery } = candidateApi;

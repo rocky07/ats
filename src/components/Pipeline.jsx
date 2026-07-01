@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Button, Card, Typography, Select, Drawer, Input, Empty, message, Dropdown, Modal, Radio, Space, Tooltip, Segmented, Tag } from 'antd';
-import { PlusOutlined, TeamOutlined, SearchOutlined, DownOutlined, FileAddOutlined, EyeOutlined, EditOutlined, DeleteOutlined, ShareAltOutlined, CopyOutlined, CompressOutlined, MailOutlined, CheckCircleOutlined, LinkOutlined, CalendarOutlined } from '@ant-design/icons';
+import { PlusOutlined, TeamOutlined, SearchOutlined, DownOutlined, FileAddOutlined, EyeOutlined, EditOutlined, DeleteOutlined, ShareAltOutlined, CopyOutlined, CompressOutlined, MailOutlined, CheckCircleOutlined, LinkOutlined, CalendarOutlined, ArrowLeftOutlined } from '@ant-design/icons';
 import { useGetRequirementsQuery } from '../redux/requirementsApi';
 import { useGetPipelineStagesQuery, useSavePipelineStagesMutation } from '../redux/pipelineStagesApi';
 import { useGetAllCandidatesQuery } from '../redux/candidateApi';
@@ -49,7 +49,7 @@ const SAMPLE_EXAM = {
 
 // Mock candidate database (would come from an API in production)
 
-const Pipeline = ({ reqId = null, region = 'global' }) => {
+const Pipeline = ({ reqId = null, region = 'global', onBack = null, backLabel = 'Back' }) => {
   const { data: requirements, isLoading } = useGetRequirementsQuery();
   const { data: candidateList = [] } = useGetAllCandidatesQuery();
   const [selectedReqId, setSelectedReqId] = useState(reqId);
@@ -336,6 +336,11 @@ const Pipeline = ({ reqId = null, region = 'global' }) => {
     <>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          {onBack && (
+            <Button icon={<ArrowLeftOutlined />} onClick={onBack} style={{ height: 40 }}>
+              {backLabel}
+            </Button>
+          )}
           <Title level={4} style={{ margin: 0, whiteSpace: 'nowrap' }}>Pipeline:</Title>
           <Select
             showSearch

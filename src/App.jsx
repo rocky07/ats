@@ -307,6 +307,7 @@ const App = () => {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [region, setRegion] = useState('global');
   const [pipelineReqId, setPipelineReqId] = useState(null);
+  const [returnToReqId, setReturnToReqId] = useState(null); // req to re-open in Requirements on back
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   if (loading) {
@@ -322,6 +323,20 @@ const App = () => {
   const handleViewPipeline = (reqId) => {
     setPipelineReqId(reqId);
     setSelectedMenu('4');
+  };
+
+  // Called from View Details modal — navigates to Pipeline and remembers which req to return to
+  const handleViewInPipeline = (reqId) => {
+    setReturnToReqId(reqId);
+    setPipelineReqId(reqId);
+    setSelectedMenu('4');
+  };
+
+  // Called from Pipeline back button — returns to Requirements and re-opens the modal
+  const handleBackToRequirements = () => {
+    setSelectedMenu('3');
+    setPipelineReqId(null);
+    // returnToReqId stays set so Requirements can open the right modal
   };
 
   const regionOptions = [
@@ -464,9 +479,23 @@ const App = () => {
 
         <Content style={{ margin: '24px 24px', flex: 1, overflowY: 'auto' }}>
           {selectedMenu === '1' && <Dashboard />}
-          {selectedMenu === '3' && <Requirements onViewPipeline={handleViewPipeline} />}
+          {selectedMenu === '3' && (
+            <Requirements
+              onViewPipeline={handleViewPipeline}
+              onViewInPipeline={handleViewInPipeline}
+              openReqId={returnToReqId}
+              onOpenReqIdConsumed={() => setReturnToReqId(null)}
+            />
+          )}
           {selectedMenu === '2' && <Candidates />}
-          {selectedMenu === '4' && <Pipeline reqId={pipelineReqId} region={region} />}
+          {selectedMenu === '4' && (
+            <Pipeline
+              reqId={pipelineReqId}
+              region={region}
+              onBack={returnToReqId ? handleBackToRequirements : null}
+              backLabel="Back to Requirement"
+            />
+          )}
           {selectedMenu === '5' && <Vendors />}
           {selectedMenu === '6' && <InterviewPanel />}
         </Content>

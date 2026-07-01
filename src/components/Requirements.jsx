@@ -3,7 +3,9 @@ import dayjs from 'dayjs';
 import { useGetRequirementsQuery, useAddRequirementMutation, useUpdateRequirementMutation, useGetDepartmentsQuery } from '../redux/requirementsApi';
 import { useUploadResumeMutation,useGetAllCandidatesQuery } from '../redux/candidateApi';
 import { useLazyGetPipelineStagesQuery, useSavePipelineStagesMutation } from '../redux/pipelineStagesApi';
-import { useGetMarketIntelligenceMutation, useGenerateJobSummaryMutation } from '../redux/intelligenceApi';
+import { useGetMarketIntelligenceMutation, useGenerateJobSummaryMutation, useRankCandidatesMutation } from '../redux/intelligenceApi';
+import { useGetExamByRequirementQuery, useGenerateExamMutation, useSendExamInviteMutation } from '../redux/examApi';
+import ScheduleInterviewDrawer from './ScheduleInterviewDrawer';
 
 // The fixed pipeline stages, in order.
 const STAGE_KEYS = ['ingested', 'ranked', 'l1', 'l2', 'l3'];
@@ -46,7 +48,8 @@ import {
   Avatar,
   Segmented,
   Table,
-  InputNumber
+  InputNumber,
+  Tabs,
 } from 'antd';
 import {
   FireOutlined,
@@ -60,7 +63,11 @@ import {
   InboxOutlined,
   UserOutlined,
   AppstoreOutlined,
-  TableOutlined
+  TableOutlined,
+  CalendarOutlined,
+  SwapOutlined,
+  StarFilled,
+  ArrowRightOutlined,
 } from '@ant-design/icons';
 import { SearchOutlined, PlusOutlined } from '@ant-design/icons';
 
@@ -72,7 +79,7 @@ const { TextArea } = Input;
 const STAGE_LABELS = { ingested: 'Ingested', ranked: 'Ranked', l1: 'L1 (Exam)', l2: 'L2 (Recruiter)', l3: 'L3 (Final)' };
 const STAGE_COLORS = { ingested: 'blue', ranked: 'gold', l1: 'purple', l2: 'cyan', l3: 'green' };
 
-const Requirements = ({ onViewPipeline }) => {
+const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqIdConsumed }) => {
   // State management for Modal visibility and submitting loader
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -92,6 +99,10 @@ const Requirements = ({ onViewPipeline }) => {
   // Dice market intelligence + AI job-summary generation
   const [fetchMarketIntelligence, { isLoading: isMarketLoading }] = useGetMarketIntelligenceMutation();
   const [generateJobSummary] = useGenerateJobSummaryMutation();
+  // Ranking + exam hooks (used inside View Details)
+  const [rankCandidatesApi, { isLoading: isRanking }] = useRankCandidatesMutation();
+  const [generateExamApi, { isLoading: isGeneratingExam }] = useGenerateExamMutation();
+  const [sendExamInviteApi] = useSendExamInviteMutation();
   
   // Ant Design form hook instance
   const [form] = Form.useForm();
@@ -140,6 +151,16 @@ const Requirements = ({ onViewPipeline }) => {
     return () => clearTimeout(timer);
   }, [watchedTitle, watchedMustHaves, watchedLocation, watchedWorkMode, jobType, isModalOpen]);
 
+  // Auto-open View Details when returning from Pipeline via Back button
+  useEffect(() => {
+    if (!openReqId || !requirements) return;
+    const req = requirements.find((r) => String(r.id) === String(openReqId));
+    if (req) {
+      handleView(req);
+      onOpenReqIdConsumed?.();
+    }
+  }, [openReqId, requirements]);
+
   // --- Layout & filtering ---
   const [viewMode, setViewMode] = useState('card'); // 'card' | 'table'
   const [statusFilter, setStatusFilter] = useState('open'); // 'open' | 'draft' | 'closed' | 'all'
@@ -153,10 +174,86 @@ const Requirements = ({ onViewPipeline }) => {
 
   // --- View Details modal: applicants & pipeline state ---
   const [viewReq, setViewReq] = useState(null);
+  const { data: currentExam } = useGetExamByRequirementQuery(viewReq?.id, { skip: !viewReq?.id });
   const [applicantsByReq, setApplicantsByReq] = useState({});
   const [addPick, setAddPick] = useState(null);
+  const [scheduleCandidate, setScheduleCandidate] = useState(null);
+  const [detailsTab, setDetailsTab] = useState('ingested');
+  const [selectedRowKeys, setSelectedRowKeys] = useState([]);
 
   const applicants = viewReq ? (applicantsByReq[viewReq.id] ?? []) : [];
+
+  // Move a candidate to a different stage and persist; moving to ranked triggers AI ranking
+  const handleMoveStage = (candidateId, newStage) => {
+    if (!viewReq) return;
+    if (newStage === 'ranked') {
+      const cand = applicants.find((c) => String(c.id) === String(candidateId));
+      if (cand) { handleRankCandidates([cand]); return; }
+    }
+    persistApplicants(viewReq.id, (list) =>
+      list.map((c) => (String(c.id) === String(candidateId) ? { ...c, stage: newStage } : c))
+    );
+  };
+
+  // AI rank one or more ingested candidates → move them to ranked with scores
+  const handleRankCandidates = async (candidates) => {
+    if (!viewReq || candidates.length === 0) return;
+    const hide = message.loading(`Ranking ${candidates.length} candidate(s) with Claude…`, 0);
+    try {
+      const { results } = await rankCandidatesApi({ candidates, requirement: viewReq }).unwrap();
+      const scored = candidates.map((c) => {
+        const r = results.find((res) => String(res.id) === String(c.id));
+        return r ? { ...c, score: r.score, rankSummary: r.summary } : c;
+      });
+      const scoredIds = new Set(scored.map((c) => String(c.id)));
+      persistApplicants(viewReq.id, (list) => {
+        const rest = list.filter((c) => !scoredIds.has(String(c.id)));
+        const sortedScored = [...scored].sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+        return [...rest, ...sortedScored.map((c) => ({ ...c, stage: 'ranked' }))];
+      });
+      setSelectedRowKeys([]);
+      message.success(`${scored.length} candidate(s) ranked and moved to Ranked`);
+    } catch (err) {
+      console.error('Ranking failed:', err);
+      message.error('Ranking failed. Check that ANTHROPIC_API_KEY is set on the server.');
+    } finally {
+      hide();
+    }
+  };
+
+  // Generate an L1 exam for the currently viewed requirement
+  const handleGenerateExam = async () => {
+    if (!viewReq) return;
+    const hide = message.loading('Generating exam with Claude…', 0);
+    try {
+      await generateExamApi(viewReq.id).unwrap();
+      message.success('Exam generated and saved!');
+    } catch {
+      message.error('Failed to generate exam. Check ANTHROPIC_API_KEY.');
+    } finally {
+      hide();
+    }
+  };
+
+  // Send L1 exam invite email to a candidate
+  const handleSendExamInvite = async (candidate) => {
+    if (!currentExam) { message.warning('No exam generated for this requirement yet.'); return; }
+    try {
+      const { examUrl } = await sendExamInviteApi({
+        candidateId: candidate.id,
+        candidateName: candidate.name,
+        candidateEmail: candidate.email,
+        examId: currentExam.id,
+        jobTitle: viewReq?.title ?? 'Job',
+      }).unwrap();
+      persistApplicants(viewReq.id, (list) =>
+        list.map((c) => String(c.id) === String(candidate.id) ? { ...c, examInvited: true, examId: currentExam.id } : c)
+      );
+      message.success(`Exam invite sent to ${candidate.name}!`);
+    } catch {
+      message.error('Failed to send invite. Check EMAIL_USER/EMAIL_PASS env vars.');
+    }
+  };
 
   const handleView = async (req) => {
     setViewReq(req);
@@ -455,106 +552,332 @@ const Requirements = ({ onViewPipeline }) => {
         />
       )}
 
-      {/* --- View Details Modal: job details + applicants + add to pipeline --- */}
+      {/* --- View Details Modal: job details + pipeline management --- */}
       <Modal
         title={viewReq ? <Title level={4} style={{ margin: 0 }}>{viewReq.title}</Title> : null}
         open={!!viewReq}
         onCancel={() => setViewReq(null)}
-        footer={<Button onClick={() => setViewReq(null)}>Close</Button>}
-        width={820}
-        destroyOnClose
-        styles={{ body: { maxHeight: '72vh', overflowY: 'auto' } }}
-      >
-        {viewReq && (
-          <>
-            {/* Job requirement details */}
-            <Card size="small" style={{ marginBottom: 20, background: '#fafafa' }}>
-              <Row gutter={[16, 8]} style={{ fontSize: 13 }}>
-                <Col span={12}><Text strong>Department:</Text> {viewReq.department}</Col>
-                <Col span={12}><Text strong>Open Date:</Text> {viewReq.openDate}</Col>
-                <Col span={12}><Text strong>Publish Date:</Text> {viewReq.publishDate || '—'}</Col>
-                <Col span={12}>
-                  <Text strong>Status:</Text>{' '}
-                  <Tag color={STATUS_COLOR[getStatus(viewReq)]} style={{ textTransform: 'capitalize' }}>
-                    {getStatus(viewReq)}
-                  </Tag>
-                </Col>
-              </Row>
-              <Divider style={{ margin: '12px 0' }} />
-              <div style={{ fontSize: 13, marginBottom: 8 }}>
-                <Text strong>Description:</Text> {viewReq.description || '—'}
-              </div>
-              <div style={{ fontSize: 13, marginBottom: 4 }}>
-                <Text strong>Must-haves:</Text> {(viewReq.mustHaves ?? []).join(', ') || '—'}
-              </div>
-              <div style={{ fontSize: 13 }}>
-                <Text strong>Nice-to-haves:</Text> {(viewReq.niceToHaves ?? []).join(', ') || '—'}
-              </div>
-            </Card>
-
-            {/* Applicants and their pipeline status */}
-            <Title level={5} style={{ marginTop: 0 }}>Applicants & Pipeline Status ({applicants.length})</Title>
-            {applicants.length === 0 ? (
-              <Empty description="No applicants yet" image={Empty.PRESENTED_IMAGE_SIMPLE} />
-            ) : (
-              <List
-                size="small"
-                dataSource={applicants}
-                renderItem={(c) => (
-                  <List.Item actions={[<Tag color={STAGE_COLORS[c.stage]} key="stage">{STAGE_LABELS[c.stage]}</Tag>]}>
-                    <List.Item.Meta
-                      avatar={<Avatar icon={<UserOutlined />} style={{ backgroundColor: '#1890ff' }} />}
-                      title={c.name}
-                      description={<span style={{ fontSize: 12 }}>{c.email}</span>}
-                    />
-                  </List.Item>
-                )}
-              />
-            )}
-
-            <Divider />
-
-            {/* Add candidate from database */}
-            <Title level={5}>Add Candidate to Pipeline</Title>
-            <Space.Compact style={{ width: '100%', marginBottom: 16 }}>
-              <Select
-                showSearch
-                placeholder="Select a candidate from the database"
-                value={addPick}
-                onChange={setAddPick}
-                optionFilterProp="label"
-                style={{ flex: 1 }}
-                options={candidateList.map((c) => {
-                  const skills = (c.skills ?? []).join(', ');
-                  const skillPreview = skills.length > 30 ? `${skills.slice(0, 30)}…` : skills;
-                  return { value: c.id, label: `${c.name} — ${skillPreview}` };
-                })}
-              />
-              <Button
-                type="primary"
-                icon={<PlusOutlined />}
-                disabled={!addPick}
-                onClick={() => handleAddFromDb(addPick)}
-                style={{ backgroundColor: '#2563eb' }}
-              >
-                Add
-              </Button>
-            </Space.Compact>
-
-            {/* Upload / drag-and-drop resume directly into the pipeline */}
-            <Upload.Dragger
-              multiple
-              showUploadList={false}
-              accept=".pdf,.doc,.docx"
-              beforeUpload={handleResumeUpload}
+        footer={
+          <Space>
+            <Button onClick={() => setViewReq(null)}>Close</Button>
+            <Button
+              type="primary"
+              icon={<ArrowRightOutlined />}
+              style={{ backgroundColor: '#2563eb' }}
+              onClick={() => {
+                const req = viewReq;
+                setViewReq(null);
+                onViewInPipeline?.(req.id);
+              }}
             >
-              <p className="ant-upload-drag-icon"><InboxOutlined /></p>
-              <p className="ant-upload-text">Click or drag resume(s) here to add directly to the pipeline</p>
-              <p className="ant-upload-hint">PDF, DOC, DOCX — each upload creates a candidate in the Ingested stage</p>
-            </Upload.Dragger>
-          </>
-        )}
+              View in Pipeline
+            </Button>
+          </Space>
+        }
+        width={960}
+        destroyOnClose
+        styles={{ body: { maxHeight: '78vh', overflowY: 'auto', padding: '16px 24px' } }}
+      >
+        {viewReq && (() => {
+          const stageCounts = STAGE_KEYS.reduce((acc, s) => {
+            acc[s] = applicants.filter((c) => c.stage === s).length;
+            return acc;
+          }, {});
+
+          // Shared columns present in every tab
+          const baseColumns = [
+            {
+              title: 'Candidate',
+              key: 'candidate',
+              render: (_, c) => (
+                <Space>
+                  <Avatar icon={<UserOutlined />} style={{ backgroundColor: '#1677ff', flexShrink: 0 }} />
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: 13 }}>{c.name}</div>
+                    <div style={{ fontSize: 11, color: '#8c8c8c' }}>{c.email || '—'}</div>
+                  </div>
+                </Space>
+              ),
+            },
+            {
+              title: 'Score',
+              key: 'score',
+              width: 90,
+              render: (_, c) => c.score != null ? (
+                <Space size={4}>
+                  <StarFilled style={{ color: '#faad14', fontSize: 12 }} />
+                  <Text strong style={{ color: c.score >= 70 ? '#389e0d' : c.score >= 40 ? '#d48806' : '#cf1322', fontSize: 13 }}>
+                    {c.score}%
+                  </Text>
+                </Space>
+              ) : <Text type="secondary" style={{ fontSize: 12 }}>—</Text>,
+            },
+            {
+              title: 'Skills',
+              key: 'skills',
+              render: (_, c) => (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                  {(c.skills ?? []).slice(0, 4).map((sk) => <Tag key={sk} style={{ fontSize: 11, margin: 0 }}>{sk}</Tag>)}
+                  {(c.skills ?? []).length > 4 && <Tag style={{ fontSize: 11, margin: 0 }}>+{c.skills.length - 4}</Tag>}
+                </div>
+              ),
+            },
+            {
+              title: 'Move Stage',
+              key: 'move',
+              width: 170,
+              render: (_, c) => (
+                <Select
+                  size="small"
+                  value={c.stage}
+                  style={{ width: 155 }}
+                  onChange={(newStage) => handleMoveStage(c.id, newStage)}
+                  options={STAGE_KEYS.map((s) => ({
+                    value: s,
+                    label: <Tag color={STAGE_COLORS[s]} style={{ margin: 0 }}>{STAGE_LABELS[s]}</Tag>,
+                  }))}
+                />
+              ),
+            },
+          ];
+
+          // Action column varies per stage
+          const actionCol = (stageKey) => ({
+            title: 'Action',
+            key: 'action',
+            width: stageKey === 'ingested' ? 110 : 140,
+            render: (_, c) => {
+              if (stageKey === 'ingested') {
+                return (
+                  <Button
+                    size="small"
+                    type="primary"
+                    loading={isRanking}
+                    onClick={() => handleRankCandidates([c])}
+                    style={{ backgroundColor: '#7c3aed', borderColor: '#7c3aed' }}
+                  >
+                    Rank
+                  </Button>
+                );
+              }
+              if (stageKey === 'l1') {
+                return (
+                  <Tooltip title={!currentExam ? 'Generate an exam first in the Pipeline view' : (c.examInvited ? 'Invite already sent' : '')}>
+                    <Button
+                      size="small"
+                      icon={<CalendarOutlined />}
+                      disabled={!currentExam}
+                      type={c.examInvited ? 'default' : 'primary'}
+                      onClick={() => handleSendExamInvite(c)}
+                    >
+                      {c.examInvited ? 'Resend Email' : 'Send Email'}
+                    </Button>
+                  </Tooltip>
+                );
+              }
+              if (stageKey === 'l2' || stageKey === 'l3') {
+                const iv = c.interviewData;
+                return (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-start' }}>
+                    {iv && (
+                      <Tooltip title={iv.teamsLink ? `Teams: ${iv.teamsLink}` : null}>
+                        <Tag color="green" style={{ fontSize: 11, margin: 0, cursor: 'default' }}>
+                          <CalendarOutlined style={{ marginRight: 4 }} />
+                          {new Date(iv.startISO).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                        </Tag>
+                      </Tooltip>
+                    )}
+                    <Button
+                      size="small"
+                      type={iv ? 'default' : 'primary'}
+                      icon={<CalendarOutlined />}
+                      onClick={() => setScheduleCandidate(c)}
+                      style={iv ? {} : { backgroundColor: '#059669', borderColor: '#059669' }}
+                    >
+                      {iv ? 'Reschedule' : 'Schedule'}
+                    </Button>
+                  </div>
+                );
+              }
+              return null;
+            },
+          });
+
+          const tableForStage = (stageKey) => {
+            const stageApplicants = applicants.filter((c) => c.stage === stageKey);
+            const isIngested = stageKey === 'ingested';
+            const isL1 = stageKey === 'l1';
+            const selectionProps = isIngested ? {
+              rowSelection: {
+                selectedRowKeys,
+                onChange: setSelectedRowKeys,
+              },
+            } : {};
+
+            return (
+              <>
+                {isL1 && (
+                  <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <Button
+                      type={currentExam ? 'default' : 'primary'}
+                      size="small"
+                      loading={isGeneratingExam}
+                      onClick={handleGenerateExam}
+                      style={currentExam ? {} : { backgroundColor: '#7c3aed', borderColor: '#7c3aed' }}
+                    >
+                      {currentExam ? '✅ Regenerate Exam' : '⚡ Generate L1 Exam'}
+                    </Button>
+                    {currentExam && (
+                      <Text type="secondary" style={{ fontSize: 12 }}>
+                        Exam ready — {currentExam.questions?.length ?? 0} questions
+                      </Text>
+                    )}
+                  </div>
+                )}
+                {stageApplicants.length === 0 ? (
+                  <Empty description={`No candidates in ${STAGE_LABELS[stageKey]}`} image={Empty.PRESENTED_IMAGE_SIMPLE} style={{ margin: '24px 0' }} />
+                ) : (
+                  <>
+                    {isIngested && selectedRowKeys.length > 0 && (
+                      <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <Text type="secondary" style={{ fontSize: 12 }}>{selectedRowKeys.length} selected</Text>
+                        <Button
+                          size="small"
+                          type="primary"
+                          loading={isRanking}
+                          style={{ backgroundColor: '#7c3aed', borderColor: '#7c3aed' }}
+                          onClick={() => {
+                            const toRank = stageApplicants.filter((c) => selectedRowKeys.includes(c.id));
+                            handleRankCandidates(toRank);
+                          }}
+                        >
+                          Rank Selected ({selectedRowKeys.length})
+                        </Button>
+                        <Button size="small" onClick={() => setSelectedRowKeys([])}>Clear</Button>
+                      </div>
+                    )}
+                    <Table
+                      rowKey="id"
+                      size="small"
+                      dataSource={stageApplicants}
+                      columns={[...baseColumns, actionCol(stageKey)]}
+                      pagination={false}
+                      style={{ marginTop: isIngested ? 0 : 8 }}
+                      {...selectionProps}
+                    />
+                  </>
+                )}
+              </>
+            );
+          };
+
+          return (
+            <>
+              {/* Job summary strip */}
+              <Card size="small" style={{ marginBottom: 16, background: '#fafafa' }}>
+                <Row gutter={[16, 4]} style={{ fontSize: 13 }}>
+                  <Col span={8}><Text type="secondary">Department:</Text> <Text strong>{viewReq.department}</Text></Col>
+                  <Col span={8}><Text type="secondary">Open Date:</Text> <Text strong>{viewReq.openDate}</Text></Col>
+                  <Col span={8}>
+                    <Text type="secondary">Status:</Text>{' '}
+                    <Tag color={STATUS_COLOR[getStatus(viewReq)]} style={{ textTransform: 'capitalize', margin: 0 }}>
+                      {getStatus(viewReq)}
+                    </Tag>
+                  </Col>
+                  {viewReq.mustHaves?.length > 0 && (
+                    <Col span={24} style={{ marginTop: 4 }}>
+                      <Text type="secondary">Must-haves:</Text>{' '}
+                      {viewReq.mustHaves.map((s) => <Tag key={s} color="blue" style={{ margin: '0 2px' }}>{s}</Tag>)}
+                    </Col>
+                  )}
+                </Row>
+              </Card>
+
+              {/* Pipeline stage tabs */}
+              <Tabs
+                activeKey={detailsTab}
+                onChange={(tab) => { setDetailsTab(tab); setSelectedRowKeys([]); }}
+                size="small"
+                items={STAGE_KEYS.map((s) => ({
+                  key: s,
+                  label: (
+                    <Space size={4}>
+                      <Tag color={STAGE_COLORS[s]} style={{ margin: 0 }}>{STAGE_LABELS[s]}</Tag>
+                      <Badge count={stageCounts[s]} showZero style={{ backgroundColor: stageCounts[s] > 0 ? '#2563eb' : '#d9d9d9' }} />
+                    </Space>
+                  ),
+                  children: tableForStage(s),
+                }))}
+                tabBarExtraContent={
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    {applicants.length} total applicant{applicants.length !== 1 ? 's' : ''}
+                  </Text>
+                }
+              />
+
+              <Divider style={{ margin: '16px 0' }} />
+
+              {/* Add candidate from database */}
+              <Title level={5} style={{ marginBottom: 10 }}>Add Candidate to Pipeline</Title>
+              <Space.Compact style={{ width: '100%', marginBottom: 16 }}>
+                <Select
+                  showSearch
+                  placeholder="Select a candidate from the database"
+                  value={addPick}
+                  onChange={setAddPick}
+                  optionFilterProp="label"
+                  style={{ flex: 1 }}
+                  options={candidateList.map((c) => {
+                    const skills = (c.skills ?? []).join(', ');
+                    const skillPreview = skills.length > 30 ? `${skills.slice(0, 30)}…` : skills;
+                    return { value: c.id, label: `${c.name} — ${skillPreview}` };
+                  })}
+                />
+                <Button
+                  type="primary"
+                  icon={<PlusOutlined />}
+                  disabled={!addPick}
+                  onClick={() => handleAddFromDb(addPick)}
+                  style={{ backgroundColor: '#2563eb' }}
+                >
+                  Add
+                </Button>
+              </Space.Compact>
+
+              {/* Resume drag-and-drop */}
+              <Upload.Dragger
+                multiple
+                showUploadList={false}
+                accept=".pdf,.doc,.docx"
+                beforeUpload={handleResumeUpload}
+              >
+                <p className="ant-upload-drag-icon"><InboxOutlined /></p>
+                <p className="ant-upload-text">Click or drag resume(s) here to add directly to the pipeline</p>
+                <p className="ant-upload-hint">PDF, DOC, DOCX — each upload creates a candidate in the Ingested stage</p>
+              </Upload.Dragger>
+            </>
+          );
+        })()}
       </Modal>
+
+      {/* Schedule Interview Drawer — triggered from View Details candidate table */}
+      <ScheduleInterviewDrawer
+        open={!!scheduleCandidate}
+        onClose={() => setScheduleCandidate(null)}
+        onScheduled={(interviewData) => {
+          if (scheduleCandidate && viewReq) {
+            persistApplicants(viewReq.id, (list) =>
+              list.map((c) =>
+                String(c.id) === String(scheduleCandidate.id) ? { ...c, interviewData } : c
+              )
+            );
+          }
+          message.success(`Interview scheduled for ${scheduleCandidate?.name}`);
+          setScheduleCandidate(null);
+        }}
+        candidate={scheduleCandidate}
+        requirement={viewReq}
+      />
 
       {/* --- New / Edit Requirement Modal Form --- */}
       <Modal

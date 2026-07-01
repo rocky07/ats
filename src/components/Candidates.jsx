@@ -1,11 +1,33 @@
 import React, { useRef, useState } from 'react';
-import { Button, Card, Input, Space, Pagination, message, Spin, Modal, Descriptions, Tag } from 'antd';
-import { SearchOutlined, UploadOutlined } from '@ant-design/icons';
+import { Button, Card, Input, Space, Pagination, message, Spin, Modal, Descriptions, Tag, Tooltip } from 'antd';
+import { SearchOutlined, UploadOutlined, DownloadOutlined } from '@ant-design/icons';
 import {
   useGetAllCandidatesQuery,
   useUploadResumeMutation,
   useDeleteCandidateMutation,
+  useGetResumeUrlQuery,
 } from '../redux/candidateApi';
+
+const ResumeDownloadButton = ({ candidateId }) => {
+  const { data, isFetching, isError } = useGetResumeUrlQuery(candidateId, { skip: !candidateId });
+
+  const handleDownload = () => {
+    if (data?.url) window.open(data.url, '_blank');
+  };
+
+  if (isError) return <Tooltip title="No resume on file"><Button icon={<DownloadOutlined />} disabled>Download Resume</Button></Tooltip>;
+
+  return (
+    <Button
+      icon={<DownloadOutlined />}
+      loading={isFetching}
+      onClick={handleDownload}
+      disabled={!data?.url}
+    >
+      Download Resume
+    </Button>
+  );
+};
 
 const Candidates = () => {
   const [page, setPage] = useState(1);
@@ -225,9 +247,12 @@ const Candidates = () => {
         open={isModalOpen}
         onCancel={handleCloseModal}
         footer={[
+          selectedCandidate?.resumeS3Key && (
+            <ResumeDownloadButton key="download" candidateId={selectedCandidate.id} />
+          ),
           <Button key="close" type="primary" onClick={handleCloseModal}>
             Close
-          </Button>
+          </Button>,
         ]}
         width={700}
         destroyOnClose
