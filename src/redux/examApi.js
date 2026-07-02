@@ -48,5 +48,6 @@ export const {
   useGetExamPublicQuery,
   useSubmitExamMutation,
   useGetSubmissionQuery,
+  useLazyGetSubmissionQuery,
   useSendExamInviteMutation,
 } = examApi;

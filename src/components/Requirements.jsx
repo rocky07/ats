@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
+import { REGION_OPTIONS } from '../constants/regions';
 import dayjs from 'dayjs';
 import { useGetRequirementsQuery, useAddRequirementMutation, useUpdateRequirementMutation, useGetDepartmentsQuery } from '../redux/requirementsApi';
 import { useUploadResumeMutation,useGetAllCandidatesQuery } from '../redux/candidateApi';
 import { useLazyGetPipelineStagesQuery, useSavePipelineStagesMutation } from '../redux/pipelineStagesApi';
 import { useGetMarketIntelligenceMutation, useGenerateJobSummaryMutation, useRankCandidatesMutation } from '../redux/intelligenceApi';
-import { useGetExamByRequirementQuery, useGenerateExamMutation, useSendExamInviteMutation } from '../redux/examApi';
+import { useGetExamByRequirementQuery, useGenerateExamMutation, useSendExamInviteMutation, useLazyGetSubmissionQuery } from '../redux/examApi';
 import ScheduleInterviewDrawer from './ScheduleInterviewDrawer';
 
 // The fixed pipeline stages, in order.
@@ -103,7 +104,8 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
   const [rankCandidatesApi, { isLoading: isRanking }] = useRankCandidatesMutation();
   const [generateExamApi, { isLoading: isGeneratingExam }] = useGenerateExamMutation();
   const [sendExamInviteApi] = useSendExamInviteMutation();
-  
+  const [fetchSubmission] = useLazyGetSubmissionQuery();
+
   // Ant Design form hook instance
   const [form] = Form.useForm();
   // Watch job type so we can conditionally show hourly-rate fields for W2 / C2C.
@@ -183,6 +185,32 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
 
   const applicants = viewReq ? (applicantsByReq[viewReq.id] ?? []) : [];
 
+  // Poll for completed exam submissions every 30s while the View Details modal is open.
+  useEffect(() => {
+    if (!viewReq) return;
+    const check = async () => {
+      const pending = (applicantsByReq[viewReq.id] ?? []).filter(
+        (c) => c.stage === 'l1' && c.examInvited && c.examScore == null && c.examId,
+      );
+      if (pending.length === 0) return;
+      let updated = false;
+      const nextList = [...(applicantsByReq[viewReq.id] ?? [])];
+      for (const c of pending) {
+        try {
+          const sub = await fetchSubmission({ examId: c.examId, candidateId: c.id }).unwrap();
+          if (sub?.score != null) {
+            const idx = nextList.findIndex((x) => String(x.id) === String(c.id));
+            if (idx !== -1) { nextList[idx] = { ...nextList[idx], examScore: sub.score }; updated = true; }
+          }
+        } catch { /* not submitted yet */ }
+      }
+      if (updated) persistApplicants(viewReq.id, () => nextList);
+    };
+    check();
+    const interval = setInterval(check, 30000);
+    return () => clearInterval(interval);
+  }, [viewReq, applicantsByReq]);
+
   // Move a candidate to a different stage and persist; moving to ranked triggers AI ranking
   const handleMoveStage = (candidateId, newStage) => {
     if (!viewReq) return;
@@ -243,11 +271,11 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
         candidateId: candidate.id,
         candidateName: candidate.name,
         candidateEmail: candidate.email,
-        examId: currentExam.id,
+        examId: currentExam.requirementId,
         jobTitle: viewReq?.title ?? 'Job',
       }).unwrap();
       persistApplicants(viewReq.id, (list) =>
-        list.map((c) => String(c.id) === String(candidate.id) ? { ...c, examInvited: true, examId: currentExam.id } : c)
+        list.map((c) => String(c.id) === String(candidate.id) ? { ...c, examInvited: true, examId: currentExam.requirementId } : c)
       );
       message.success(`Exam invite sent to ${candidate.name}!`);
     } catch {
@@ -478,6 +506,9 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
               <div style={{ marginBottom: 12, fontSize: 12 }}>
                 <div><strong>Must-haves:</strong> {(req.mustHaves ?? []).join(', ') || '—'}</div>
                 <div><strong>Nice-to-haves:</strong> {(req.niceToHaves ?? []).join(', ') || '—'}</div>
+                {(req.regions ?? []).length > 0 && (
+                  <div><strong>Regions:</strong> {req.regions.join(', ')}</div>
+                )}
               </div>
               <Button
                 type="primary"
@@ -661,16 +692,24 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
                 );
               }
               if (stageKey === 'l1') {
+                if (c.examScore != null) {
+                  return (
+                    <Tag color={c.examScore >= 70 ? 'success' : c.examScore >= 40 ? 'warning' : 'error'}>
+                      Exam: {c.examScore}%
+                    </Tag>
+                  );
+                }
                 return (
-                  <Tooltip title={!currentExam ? 'Generate an exam first in the Pipeline view' : (c.examInvited ? 'Invite already sent' : '')}>
+                  <Tooltip title={!currentExam ? 'Generate an exam first in the Pipeline view' : (c.examInvited ? 'Resend exam invite link' : 'Send exam invite')}>
                     <Button
                       size="small"
                       icon={<CalendarOutlined />}
                       disabled={!currentExam}
-                      type={c.examInvited ? 'default' : 'primary'}
+                      type="default"
                       onClick={() => handleSendExamInvite(c)}
+                      style={c.examInvited ? { color: '#9ca3af', borderColor: '#d1d5db', backgroundColor: '#f9fafb' } : {}}
                     >
-                      {c.examInvited ? 'Resend Email' : 'Send Email'}
+                      {c.examInvited ? 'Resend Link' : 'Send Email'}
                     </Button>
                   </Tooltip>
                 );
@@ -788,6 +827,12 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
                     <Col span={24} style={{ marginTop: 4 }}>
                       <Text type="secondary">Must-haves:</Text>{' '}
                       {viewReq.mustHaves.map((s) => <Tag key={s} color="blue" style={{ margin: '0 2px' }}>{s}</Tag>)}
+                    </Col>
+                  )}
+                  {(viewReq.regions ?? []).length > 0 && (
+                    <Col span={24} style={{ marginTop: 4 }}>
+                      <Text type="secondary">Regions:</Text>{' '}
+                      {viewReq.regions.map((r) => <Tag key={r} color="purple" style={{ margin: '0 2px' }}>{r}</Tag>)}
                     </Col>
                   )}
                 </Row>
@@ -972,6 +1017,16 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
               </Form.Item>
             </Col>
           </Row>
+
+          {/* Region */}
+          <Form.Item name="regions" label="Region(s)">
+            <Select
+              mode="multiple"
+              placeholder="Select one or more regions"
+              size="large"
+              options={REGION_OPTIONS}
+            />
+          </Form.Item>
 
           {/* Publish Date & Status */}
           <Row gutter={16}>

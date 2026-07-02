@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { API_BASE_URL } from './config';
+import { REGION_OPTIONS } from './constants/regions';
 import { useAuth, getStoredToken } from './auth/AuthContext';
 import LoginPage from './pages/LoginPage';
 import { 
@@ -339,12 +340,7 @@ const App = () => {
     // returnToReqId stays set so Requirements can open the right modal
   };
 
-  const regionOptions = [
-    { value: 'global', label: 'Global' },
-    { value: 'india', label: 'India' },
-    { value: 'middleeast', label: 'Middle East' },
-    { value: 'us', label: 'US' },
-  ];
+  const regionOptions = REGION_OPTIONS;
 
   const menuTitles = {
     '1': 'Dashboard',

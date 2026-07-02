@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Button, Card, Typography, Select, Drawer, Input, Empty, message, Dropdown, Modal, Radio, Space, Tooltip, Segmented, Tag } from 'antd';
-import { PlusOutlined, TeamOutlined, SearchOutlined, DownOutlined, FileAddOutlined, EyeOutlined, EditOutlined, DeleteOutlined, ShareAltOutlined, CopyOutlined, CompressOutlined, MailOutlined, CheckCircleOutlined, LinkOutlined, CalendarOutlined, ArrowLeftOutlined } from '@ant-design/icons';
+import { Button, Card, Typography, Select, Drawer, Input, Empty, message, Dropdown, Modal, Radio, Space, Tooltip, Segmented, Tag, Descriptions } from 'antd';
+import { PlusOutlined, TeamOutlined, SearchOutlined, DownOutlined, FileAddOutlined, DeleteOutlined, ShareAltOutlined, CopyOutlined, CompressOutlined, MailOutlined, CheckCircleOutlined, LinkOutlined, CalendarOutlined, ArrowLeftOutlined, UserOutlined } from '@ant-design/icons';
 import { useGetRequirementsQuery } from '../redux/requirementsApi';
 import { useGetPipelineStagesQuery, useSavePipelineStagesMutation } from '../redux/pipelineStagesApi';
 import { useGetAllCandidatesQuery } from '../redux/candidateApi';
@@ -9,6 +9,7 @@ import {
   useGenerateExamMutation,
   useGetExamByRequirementQuery,
   useSendExamInviteMutation,
+  useLazyGetSubmissionQuery,
 } from '../redux/examApi';
 import { API_BASE_URL } from '../config';
 import ScheduleInterviewDrawer from './ScheduleInterviewDrawer';
@@ -84,8 +85,36 @@ const Pipeline = ({ reqId = null, region = 'global', onBack = null, backLabel = 
   );
   const [generateExamApi, { isLoading: isGeneratingExam }] = useGenerateExamMutation();
   const [sendExamInviteApi] = useSendExamInviteMutation();
+  const [fetchSubmission] = useLazyGetSubmissionQuery();
   const [inviteModalOpen, setInviteModalOpen] = useState(false);
   const [inviteCandidate, setInviteCandidate] = useState(null);
+
+  // Candidate profile modal
+  const [profileCandidate, setProfileCandidate] = useState(null);
+  const [profileModalOpen, setProfileModalOpen] = useState(false);
+
+  // Poll for completed exam submissions every 30s when there are invited candidates without a score.
+  useEffect(() => {
+    const check = async () => {
+      const pending = (pipelineData.l1 ?? []).filter((c) => c.examInvited && c.examScore == null && c.examId);
+      if (pending.length === 0) return;
+      let updated = false;
+      const nextL1 = [...(pipelineData.l1 ?? [])];
+      for (const c of pending) {
+        try {
+          const sub = await fetchSubmission({ examId: c.examId, candidateId: c.id }).unwrap();
+          if (sub?.score != null) {
+            const idx = nextL1.findIndex((x) => String(x.id) === String(c.id));
+            if (idx !== -1) { nextL1[idx] = { ...nextL1[idx], examScore: sub.score }; updated = true; }
+          }
+        } catch { /* not submitted yet */ }
+      }
+      if (updated) persistStages({ ...pipelineData, l1: nextL1 });
+    };
+    check();
+    const interval = setInterval(check, 30000);
+    return () => clearInterval(interval);
+  }, [pipelineData.l1, selectedReqId]);
 
   // Schedule interview drawer
   const [scheduleDrawerOpen, setScheduleDrawerOpen] = useState(false);
@@ -246,7 +275,7 @@ const Pipeline = ({ reqId = null, region = 'global', onBack = null, backLabel = 
       openExam('edit');
     } else if (key === 'link') {
       if (!currentExam) { message.info('Generate an exam first.'); return; }
-      const url = `${window.location.origin}/exam/${currentExam.id}`;
+      const url = `${window.location.origin}/exam/${currentExam.requirementId}`;
       navigator.clipboard.writeText(url).then(
         () => message.success('Exam link copied to clipboard'),
         () => message.info(`Exam link: ${url}`),
@@ -270,13 +299,13 @@ const Pipeline = ({ reqId = null, region = 'global', onBack = null, backLabel = 
         candidateId: candidate.id,
         candidateName: candidate.name,
         candidateEmail: candidate.email,
-        examId: currentExam.id,
+        examId: currentExam.requirementId,
         jobTitle: requirement?.title ?? 'Job',
       }).unwrap();
       // Mark candidate as exam-invited in the pipeline
       const updated = { ...pipelineData };
       updated.l1 = updated.l1.map((c) =>
-        String(c.id) === String(candidate.id) ? { ...c, examInvited: true, examId: currentExam.id } : c
+        String(c.id) === String(candidate.id) ? { ...c, examInvited: true, examId: currentExam.requirementId } : c
       );
       persistStages(updated);
       message.success(`Exam invite sent to ${candidate.name}! Link: ${examUrl}`);
@@ -483,57 +512,104 @@ const Pipeline = ({ reqId = null, region = 'global', onBack = null, backLabel = 
                     </div>
                   ) : (
                     <div style={{ fontSize: 12 }}>
-                      <Text strong>{candidate.name}</Text>
-                      <div style={{ fontSize: 11, color: '#666', marginTop: 4 }}>
-                        EMAIL: {candidate.email}
-                      </div>
-                      <div style={{ fontSize: 11, color: '#666', marginTop: 2 }}>
-                        SKILLS: {(candidate.skills || []).join(', ')}
-                      </div>
-                      {candidate.score != null && (
-                        <Tooltip title={candidate.rankSummary}>
-                          <div style={{ marginTop: 8, padding: 8, backgroundColor: '#dbeafe', borderRadius: 4, fontSize: 11, fontWeight: 600, cursor: 'help' }}>
-                            RANK SCORE: {candidate.score}/100
-                          </div>
+                      {/* Name row with view profile button */}
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 4 }}>
+                        <div>
+                          <Text strong style={{ fontSize: 12 }}>{candidate.name}</Text>
+                          {candidate.title && (
+                            <div style={{ fontSize: 11, color: '#6b7280', marginTop: 1 }}>{candidate.title}</div>
+                          )}
+                          {!candidate.title && candidate.email && (
+                            <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 1 }}>{candidate.email}</div>
+                          )}
+                        </div>
+                        <Tooltip title="View candidate profile">
+                          <Button
+                            size="small"
+                            icon={<UserOutlined />}
+                            onClick={(e) => { e.stopPropagation(); setProfileCandidate(candidate); setProfileModalOpen(true); }}
+                            style={{ fontSize: 10, height: 22, padding: '0 6px', flexShrink: 0 }}
+                          />
                         </Tooltip>
-                      )}
-                      {stage.key === 'l1' && (
-                        <div style={{ marginTop: 8, display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-                          {candidate.examScore != null ? (
-                            <Tag icon={<CheckCircleOutlined />} color="success">
-                              Exam Score: {candidate.examScore}%
+                      </div>
+
+                      {/* Skills */}
+                      {(candidate.skills || []).length > 0 && (() => {
+                        const visible = candidate.skills.slice(0, 4);
+                        const extra = candidate.skills.length - visible.length;
+                        return (
+                          <div style={{ marginTop: 5, display: 'flex', flexWrap: 'wrap', gap: 3 }}>
+                            {visible.map((s) => (
+                              <Tag key={s} style={{ fontSize: 10, margin: 0, padding: '0 5px', lineHeight: '18px' }}>{s}</Tag>
+                            ))}
+                            {extra > 0 && (
+                              <Tag style={{ fontSize: 10, margin: 0, padding: '0 5px', lineHeight: '18px', color: '#9ca3af', borderColor: '#d1d5db', background: '#f9fafb' }}>+{extra}</Tag>
+                            )}
+                          </div>
+                        );
+                      })()}
+
+                      {/* Rank score */}
+                      {candidate.score != null && (
+                        <div style={{ marginTop: 6 }}>
+                          <Tooltip title={candidate.rankSummary}>
+                            <Tag color="blue" style={{ fontSize: 10, cursor: candidate.rankSummary ? 'help' : 'default', margin: 0 }}>
+                              Rank Score: {candidate.score}/100
                             </Tag>
-                          ) : candidate.examInvited ? (
-                            <Tag icon={<MailOutlined />} color="orange">Exam Sent</Tag>
+                          </Tooltip>
+                        </div>
+                      )}
+
+                      {/* Exam score */}
+                      {candidate.examScore != null && (
+                        <div style={{ marginTop: 4 }}>
+                          <Tag icon={<CheckCircleOutlined />} color="success" style={{ fontSize: 10, margin: 0 }}>
+                            Exam Score: {candidate.examScore}%
+                          </Tag>
+                        </div>
+                      )}
+
+                      {/* Exam action */}
+                      {stage.key === 'l1' && candidate.examScore == null && (
+                        <div style={{ marginTop: 4 }}>
+                          {candidate.examInvited ? (
+                            <Tooltip title="Resend exam invite link">
+                              <Button
+                                size="small"
+                                icon={<MailOutlined />}
+                                onClick={(e) => { e.stopPropagation(); handleSendInvite(candidate); }}
+                                style={{ fontSize: 10, height: 22, color: '#9ca3af', borderColor: '#d1d5db', backgroundColor: '#f9fafb' }}
+                              >
+                                Resend Link
+                              </Button>
+                            </Tooltip>
                           ) : (
                             <Button
                               size="small"
                               icon={<MailOutlined />}
                               onClick={(e) => { e.stopPropagation(); handleSendInvite(candidate); }}
-                              style={{ fontSize: 11, height: 24 }}
+                              style={{ fontSize: 10, height: 22 }}
                             >
                               Send Exam
                             </Button>
                           )}
                         </div>
                       )}
+
+                      {/* Interview actions */}
                       {(stage.key === 'l2' || stage.key === 'l3') && (
-                        <div style={{ marginTop: 8, display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                        <div style={{ marginTop: 4, display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
                           {candidate.interviewData ? (
                             <>
                               <Tooltip title={`Teams: ${candidate.interviewData.teamsLink ?? 'N/A'}`}>
-                                <Tag icon={<CalendarOutlined />} color="blue" style={{ fontSize: 11, cursor: 'default' }}>
-                                  Interview: {new Date(candidate.interviewData.startISO).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                                <Tag icon={<CalendarOutlined />} color="blue" style={{ fontSize: 10, cursor: 'default', margin: 0 }}>
+                                  {new Date(candidate.interviewData.startISO).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                                 </Tag>
                               </Tooltip>
                               <Button
                                 size="small"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setScheduleCandidate(candidate);
-                                  setScheduleDrawerOpen(true);
-                                }}
-                                style={{ fontSize: 11, height: 24 }}
+                                onClick={(e) => { e.stopPropagation(); setScheduleCandidate(candidate); setScheduleDrawerOpen(true); }}
+                                style={{ fontSize: 10, height: 22 }}
                               >
                                 Reschedule
                               </Button>
@@ -542,14 +618,10 @@ const Pipeline = ({ reqId = null, region = 'global', onBack = null, backLabel = 
                             <Button
                               size="small"
                               icon={<CalendarOutlined />}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setScheduleCandidate(candidate);
-                                setScheduleDrawerOpen(true);
-                              }}
-                              style={{ fontSize: 11, height: 24, borderColor: '#2563eb', color: '#2563eb' }}
+                              onClick={(e) => { e.stopPropagation(); setScheduleCandidate(candidate); setScheduleDrawerOpen(true); }}
+                              style={{ fontSize: 10, height: 22, borderColor: '#2563eb', color: '#2563eb' }}
                             >
-                              Schedule Interview
+                              Schedule
                             </Button>
                           )}
                         </div>
@@ -649,6 +721,106 @@ const Pipeline = ({ reqId = null, region = 'global', onBack = null, backLabel = 
         region={region}
         requirement={(requirements ?? []).find((r) => String(r.id) === String(selectedReqId))}
       />
+
+      {/* --- Candidate Profile Modal --- */}
+      <Modal
+        title="Candidate Profile"
+        open={profileModalOpen}
+        onCancel={() => setProfileModalOpen(false)}
+        afterClose={() => setProfileCandidate(null)}
+        width={760}
+        destroyOnClose
+        footer={<Button key="close" onClick={() => setProfileModalOpen(false)}>Close</Button>}
+        styles={{ body: { maxHeight: '65vh', overflowY: 'auto' } }}
+      >
+        {profileCandidate && (
+          <div style={{ marginTop: 8 }}>
+            {profileCandidate.summary && (
+              <div style={{
+                background: '#f0f5ff', border: '1px solid #adc6ff', borderRadius: 6,
+                padding: '10px 14px', marginBottom: 16, color: '#1d3557', fontSize: 13,
+              }}>
+                {profileCandidate.summary}
+              </div>
+            )}
+
+            <Descriptions bordered column={2} size="small">
+              <Descriptions.Item label="Full Name" span={2}>
+                <strong>{profileCandidate.name || 'N/A'}</strong>
+                {profileCandidate.title && (
+                  <span style={{ marginLeft: 8, color: '#6b7280', fontWeight: 400 }}>— {profileCandidate.title}</span>
+                )}
+              </Descriptions.Item>
+              <Descriptions.Item label="Email">{profileCandidate.email || 'N/A'}</Descriptions.Item>
+              <Descriptions.Item label="Phone">{profileCandidate.phone || 'N/A'}</Descriptions.Item>
+              {profileCandidate.location && (
+                <Descriptions.Item label="Location">{profileCandidate.location}</Descriptions.Item>
+              )}
+              {profileCandidate.yearsOfExperience > 0 && (
+                <Descriptions.Item label="Experience">
+                  {profileCandidate.yearsOfExperience} year{profileCandidate.yearsOfExperience !== 1 ? 's' : ''}
+                </Descriptions.Item>
+              )}
+              <Descriptions.Item label="Skills" span={2}>
+                <Space size={[4, 6]} wrap>
+                  {(profileCandidate.skills || []).length > 0
+                    ? profileCandidate.skills.map((s) => <Tag color="blue" key={s}>{s}</Tag>)
+                    : <span style={{ color: '#9ca3af' }}>None</span>
+                  }
+                </Space>
+              </Descriptions.Item>
+              {(profileCandidate.certifications || []).length > 0 && (
+                <Descriptions.Item label="Certifications" span={2}>
+                  <Space size={[4, 6]} wrap>
+                    {profileCandidate.certifications.map((c) => <Tag color="green" key={c}>{c}</Tag>)}
+                  </Space>
+                </Descriptions.Item>
+              )}
+              {(profileCandidate.languages || []).length > 0 && (
+                <Descriptions.Item label="Languages" span={2}>
+                  {profileCandidate.languages.join(', ')}
+                </Descriptions.Item>
+              )}
+              {profileCandidate.score != null && (
+                <Descriptions.Item label="Rank Score" span={2}>
+                  <Tooltip title={profileCandidate.rankSummary}>
+                    <Tag color="blue" style={{ cursor: 'help' }}>{profileCandidate.score}/100</Tag>
+                  </Tooltip>
+                  {profileCandidate.rankSummary && (
+                    <span style={{ fontSize: 12, color: '#6b7280', marginLeft: 8 }}>{profileCandidate.rankSummary}</span>
+                  )}
+                </Descriptions.Item>
+              )}
+            </Descriptions>
+
+            {(profileCandidate.experience || []).length > 0 && (
+              <div style={{ marginTop: 16 }}>
+                <div style={{ fontWeight: 600, marginBottom: 8, color: '#374151' }}>Work Experience</div>
+                {profileCandidate.experience.map((exp, i) => (
+                  <div key={i} style={{ borderLeft: '3px solid #6366f1', paddingLeft: 12, marginBottom: 12 }}>
+                    <div style={{ fontWeight: 600 }}>{exp.title} <span style={{ color: '#6b7280', fontWeight: 400 }}>@ {exp.company}</span></div>
+                    <div style={{ fontSize: 12, color: '#9ca3af', marginBottom: 4 }}>{exp.startDate} – {exp.endDate}</div>
+                    {exp.description && <div style={{ fontSize: 13 }}>{exp.description}</div>}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {(profileCandidate.education || []).length > 0 && (
+              <div style={{ marginTop: 16 }}>
+                <div style={{ fontWeight: 600, marginBottom: 8, color: '#374151' }}>Education</div>
+                {profileCandidate.education.map((edu, i) => (
+                  <div key={i} style={{ marginBottom: 8 }}>
+                    <span style={{ fontWeight: 500 }}>{edu.degree}</span>
+                    {edu.institution && <span style={{ color: '#6b7280' }}> — {edu.institution}</span>}
+                    {edu.year && <span style={{ color: '#9ca3af', fontSize: 12 }}> ({edu.year})</span>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </Modal>
 
       {/* --- Online Exam Modal (View / Edit) --- */}
       <Modal
