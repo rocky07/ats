@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { API_BASE_URL } from '../config';
-import { initCognito, cognitoLogin, cognitoLogout, getCognitoCurrentSession } from './cognitoService';
+import { initCognito, cognitoLogin, cognitoLogout, getCognitoCurrentSession, completeNewPassword } from './cognitoService';
 
 const AuthContext = createContext(null);
 
@@ -33,9 +33,8 @@ export function AuthProvider({ children }) {
           initCognito({ userPoolId: config.userPoolId, clientId: config.clientId });
           // Try to restore Cognito session
           try {
-            const token = await getCognitoCurrentSession();
-            storeToken(token);
-            await fetchMe(token);
+            const { accessToken, payload } = await getCognitoCurrentSession();
+            await provisionFromCognito(accessToken, payload);
           } catch {
             storeToken(null);
           }
@@ -69,24 +68,35 @@ export function AuthProvider({ children }) {
     return data;
   };
 
+  const provisionFromCognito = useCallback(async (accessToken, payload) => {
+    storeToken(accessToken);
+    const provRes = await fetch(`${API_BASE_URL}/auth/provision`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify({
+        cognitoSub: payload.sub,
+        email: payload.email,
+        name: payload.name || payload.email || payload['cognito:username'],
+        groups: payload['cognito:groups'] ?? [],
+      }),
+    });
+    const data = await provRes.json();
+    setUser(data.user);
+    setUserSettings(data.settings);
+  }, []);
+
+  const confirmNewPassword = useCallback(async (cognitoUser, newPassword) => {
+    const { accessToken, payload } = await completeNewPassword(cognitoUser, newPassword);
+    await provisionFromCognito(accessToken, payload);
+  }, [provisionFromCognito]);
+
   const login = useCallback(async (email, password) => {
     if (cognitoConfigured) {
-      const { accessToken, payload } = await cognitoLogin(email, password);
-      storeToken(accessToken);
-      // JIT provision
-      const provRes = await fetch(`${API_BASE_URL}/auth/provision`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
-        body: JSON.stringify({
-          cognitoSub: payload.sub,
-          email: payload.email,
-          name: payload.name || payload.email || payload['cognito:username'],
-          groups: payload['cognito:groups'] ?? [],
-        }),
-      });
-      const data = await provRes.json();
-      setUser(data.user);
-      setUserSettings(data.settings);
+      const result = await cognitoLogin(email, password);
+      if (result.challenge === 'NEW_PASSWORD_REQUIRED') {
+        return result; // caller (LoginPage) handles the challenge UI
+      }
+      await provisionFromCognito(result.accessToken, result.payload);
     } else {
       // Dev login
       const res = await fetch(`${API_BASE_URL}/auth/dev-login`, {
@@ -129,6 +139,7 @@ export function AuthProvider({ children }) {
       loading,
       cognitoConfigured,
       login,
+      confirmNewPassword,
       logout,
       refreshSettings,
       isAuthenticated: !!user,

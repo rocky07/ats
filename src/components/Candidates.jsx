@@ -51,7 +51,6 @@ const Candidates = () => {
   };
 
   const handleCloseModal = () => {
-    setSelectedCandidate(null);
     setIsModalOpen(false);
   };
 
@@ -246,46 +245,111 @@ const Candidates = () => {
         title="Candidate Profile Details"
         open={isModalOpen}
         onCancel={handleCloseModal}
+        afterClose={() => setSelectedCandidate(null)}
         footer={[
-          selectedCandidate?.resumeS3Key && (
-            <ResumeDownloadButton key="download" candidateId={selectedCandidate.id} />
-          ),
+          selectedCandidate?.resumeS3Key
+            ? <ResumeDownloadButton key="download" candidateId={selectedCandidate.id} />
+            : null,
           <Button key="close" type="primary" onClick={handleCloseModal}>
             Close
           </Button>,
-        ]}
-        width={700}
+        ].filter(Boolean)}
+        width={800}
         destroyOnClose
       >
         {selectedCandidate && (
-          <Descriptions bordered column={1} size="small" style={{ marginTop: 16 }}>
-            <Descriptions.Item label="Full Name">
-              <strong>{selectedCandidate.name || 'N/A'}</strong>
-            </Descriptions.Item>
-            <Descriptions.Item label="Email Address">
-              {selectedCandidate.email || 'N/A'}
-            </Descriptions.Item>
-            <Descriptions.Item label="Phone Number">
-              {selectedCandidate.phone || 'N/A'}
-            </Descriptions.Item>
-            <Descriptions.Item label="Source Document">
-              {selectedCandidate.source || 'N/A'}
-            </Descriptions.Item>
-            <Descriptions.Item label="Ingestion Date">
-              {selectedCandidate.date || 'N/A'}
-            </Descriptions.Item>
-            <Descriptions.Item label="Extracted Skills">
-              <Space size={[4, 8]} wrap>
-                {(selectedCandidate.skills || []).length > 0 ? (
-                  selectedCandidate.skills.map((skill) => (
-                    <Tag color="blue" key={skill}>{skill}</Tag>
-                  ))
-                ) : (
-                  <span style={{ color: '#9ca3af' }}>No parsed skills found</span>
+          <div style={{ marginTop: 16 }}>
+            {/* Summary banner — only shown when AI-parsed */}
+            {selectedCandidate.summary && (
+              <div style={{
+                background: '#f0f5ff', border: '1px solid #adc6ff', borderRadius: 6,
+                padding: '10px 14px', marginBottom: 16, color: '#1d3557', fontSize: 13,
+              }}>
+                {selectedCandidate.summary}
+              </div>
+            )}
+
+            <Descriptions bordered column={2} size="small">
+              <Descriptions.Item label="Full Name" span={2}>
+                <strong>{selectedCandidate.name || 'N/A'}</strong>
+                {selectedCandidate.title && (
+                  <span style={{ marginLeft: 8, color: '#6b7280', fontWeight: 400 }}>
+                    — {selectedCandidate.title}
+                  </span>
                 )}
-              </Space>
-            </Descriptions.Item>
-          </Descriptions>
+              </Descriptions.Item>
+              <Descriptions.Item label="Email">{selectedCandidate.email || 'N/A'}</Descriptions.Item>
+              <Descriptions.Item label="Phone">{selectedCandidate.phone || 'N/A'}</Descriptions.Item>
+              {selectedCandidate.location && (
+                <Descriptions.Item label="Location">{selectedCandidate.location}</Descriptions.Item>
+              )}
+              {selectedCandidate.yearsOfExperience > 0 && (
+                <Descriptions.Item label="Experience">
+                  {selectedCandidate.yearsOfExperience} year{selectedCandidate.yearsOfExperience !== 1 ? 's' : ''}
+                </Descriptions.Item>
+              )}
+              <Descriptions.Item label="Source">{selectedCandidate.source || 'N/A'}</Descriptions.Item>
+              <Descriptions.Item label="Date Added">{selectedCandidate.date || 'N/A'}</Descriptions.Item>
+
+              <Descriptions.Item label="Skills" span={2}>
+                <Space size={[4, 8]} wrap>
+                  {(selectedCandidate.skills || []).length > 0 ? (
+                    selectedCandidate.skills.map((skill) => (
+                      <Tag color="blue" key={skill}>{skill}</Tag>
+                    ))
+                  ) : (
+                    <span style={{ color: '#9ca3af' }}>No parsed skills found</span>
+                  )}
+                </Space>
+              </Descriptions.Item>
+
+              {(selectedCandidate.certifications || []).length > 0 && (
+                <Descriptions.Item label="Certifications" span={2}>
+                  <Space size={[4, 8]} wrap>
+                    {selectedCandidate.certifications.map((c) => (
+                      <Tag color="green" key={c}>{c}</Tag>
+                    ))}
+                  </Space>
+                </Descriptions.Item>
+              )}
+
+              {(selectedCandidate.languages || []).length > 0 && (
+                <Descriptions.Item label="Languages" span={2}>
+                  {selectedCandidate.languages.join(', ')}
+                </Descriptions.Item>
+              )}
+            </Descriptions>
+
+            {/* Work Experience */}
+            {(selectedCandidate.experience || []).length > 0 && (
+              <div style={{ marginTop: 16 }}>
+                <div style={{ fontWeight: 600, marginBottom: 8, color: '#374151' }}>Work Experience</div>
+                {selectedCandidate.experience.map((exp, i) => (
+                  <div key={i} style={{
+                    borderLeft: '3px solid #6366f1', paddingLeft: 12, marginBottom: 12,
+                  }}>
+                    <div style={{ fontWeight: 600 }}>{exp.title} <span style={{ color: '#6b7280', fontWeight: 400 }}>@ {exp.company}</span></div>
+                    <div style={{ fontSize: 12, color: '#9ca3af', marginBottom: 4 }}>{exp.startDate} – {exp.endDate}</div>
+                    {exp.description && <div style={{ fontSize: 13 }}>{exp.description}</div>}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Education */}
+            {(selectedCandidate.education || []).length > 0 && (
+              <div style={{ marginTop: 16 }}>
+                <div style={{ fontWeight: 600, marginBottom: 8, color: '#374151' }}>Education</div>
+                {selectedCandidate.education.map((edu, i) => (
+                  <div key={i} style={{ marginBottom: 8 }}>
+                    <span style={{ fontWeight: 500 }}>{edu.degree}</span>
+                    {edu.institution && <span style={{ color: '#6b7280' }}> — {edu.institution}</span>}
+                    {edu.year && <span style={{ color: '#9ca3af', fontSize: 12 }}> ({edu.year})</span>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         )}
       </Modal>
     </>

@@ -368,7 +368,7 @@ const App = () => {
   const sidebarItems = [
     { key: '1', icon: <DashboardOutlined />, label: 'Dashboard' },
     { key: '2', icon: <UserOutlined />, label: 'Candidates' },
-    { key: '3', icon: <AppstoreOutlined />, label: 'Requirements' },
+    { key: '3', icon: <AppstoreOutlined />, label: 'Job Requirements' },
     { key: '4', icon: <ArrowUpOutlined />, label: 'Pipelines' },
     { key: '5', icon: <ShopOutlined />, label: 'Vendors' },
     { key: '6', icon: <TeamOutlined />, label: 'Interview Panel' },

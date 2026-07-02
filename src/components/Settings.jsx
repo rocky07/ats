@@ -19,7 +19,6 @@ import {
   message,
 } from 'antd';
 import {
-  MailOutlined,
   GlobalOutlined,
   RobotOutlined,
   SettingOutlined,
@@ -27,13 +26,11 @@ import {
   CloseCircleOutlined,
   LinkOutlined,
   SaveOutlined,
-  ReloadOutlined,
   LockOutlined,
   UserOutlined,
   BellOutlined,
   LinkedinOutlined,
 } from '@ant-design/icons';
-import settingsData from '../../settings.json';
 import { useAuth, getStoredToken } from '../auth/AuthContext';
 import {
   useGetSystemSettingsQuery,
@@ -44,10 +41,6 @@ import {
 
 const { Title, Text, Paragraph } = Typography;
 
-const loadSettings = () =>
-  new Promise((resolve) =>
-    setTimeout(() => resolve(structuredClone(settingsData)), 400)
-  );
 
 // ─── Locked section placeholder shown to non-admins ──────────────────────────
 const AdminLockedCard = ({ title }) => (
@@ -69,50 +62,7 @@ const AdminLockedCard = ({ title }) => (
   </Card>
 );
 
-// ─── SMTP card (admin) ────────────────────────────────────────────────────────
-const SmtpCard = () => {
-  const { data: sysData, isLoading } = useGetSystemSettingsQuery();
-  const [updateSystem, { isLoading: saving }] = useUpdateSystemSettingsMutation();
-  const [form] = Form.useForm();
 
-  useEffect(() => {
-    if (sysData?.smtp) form.setFieldsValue({
-      smtpHost: sysData.smtp.host,
-      smtpPort: sysData.smtp.port,
-      smtpUser: sysData.smtp.user,
-      smtpPass: sysData.smtp.pass,
-      smtpFrom: sysData.smtp.from,
-    });
-  }, [sysData]);
-
-  const onSave = async () => {
-    const v = form.getFieldsValue();
-    await updateSystem({
-      smtp: { host: v.smtpHost, port: v.smtpPort, user: v.smtpUser, pass: v.smtpPass, from: v.smtpFrom },
-    }).unwrap();
-    message.success('SMTP settings saved');
-  };
-
-  if (isLoading) return <Spin size="small" />;
-
-  return (
-    <Card
-      title={<Space><MailOutlined />SMTP Configuration <Tag color="red" style={{ fontSize: 10 }}>Admin Only</Tag></Space>}
-      style={{ borderRadius: 10, marginBottom: 16 }}
-      extra={<Button size="small" type="primary" icon={<SaveOutlined />} loading={saving} onClick={onSave} style={{ backgroundColor: '#2563eb' }}>Save SMTP</Button>}
-    >
-      <Form form={form} layout="vertical">
-        <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 16 }}>
-          <Form.Item name="smtpHost" label="Host" style={{ marginBottom: 0 }}><Input placeholder="smtp.gmail.com" /></Form.Item>
-          <Form.Item name="smtpPort" label="Port" style={{ marginBottom: 0 }}><InputNumber style={{ width: '100%' }} placeholder="587" /></Form.Item>
-          <Form.Item name="smtpUser" label="Username" style={{ marginBottom: 0 }}><Input placeholder="you@company.com" /></Form.Item>
-          <Form.Item name="smtpPass" label="Password" style={{ marginBottom: 0 }}><Input.Password /></Form.Item>
-        </div>
-        <Form.Item name="smtpFrom" label="From Address" style={{ marginBottom: 0, marginTop: 12 }}><Input placeholder="no-reply@company.com" /></Form.Item>
-      </Form>
-    </Card>
-  );
-};
 
 // ─── Personal LinkedIn card (all users) ──────────────────────────────────────
 const PersonalLinkedInCard = () => {
@@ -455,6 +405,92 @@ const JobBoardsTab = ({ isAdmin }) => {
   );
 };
 
+// ─── AI Settings Tab ─────────────────────────────────────────────────────────
+const AISettingsTab = () => {
+  const { data: userData, isLoading } = useGetUserSettingsQuery();
+  const [updateUser, { isLoading: saving }] = useUpdateUserSettingsMutation();
+  const [form] = Form.useForm();
+
+  useEffect(() => {
+    if (userData) form.setFieldsValue({
+      model: userData.aiSettings?.model ?? 'claude-sonnet-4-6',
+      tokenLimit: userData.aiSettings?.tokenLimit ?? 4096,
+      temperature: userData.aiSettings?.temperature ?? 0.7,
+      enableAIResumeParsing: userData.aiSettings?.enableAIResumeParsing ?? false,
+      enableResumeScreening: userData.aiSettings?.enableResumeScreening ?? true,
+      enableJdGeneration: userData.aiSettings?.enableJdGeneration ?? true,
+      enableCandidateSummary: userData.aiSettings?.enableCandidateSummary ?? true,
+      enableExamGeneration: userData.aiSettings?.enableExamGeneration ?? true,
+    });
+  }, [userData]);
+
+  const onSave = async () => {
+    const v = form.getFieldsValue();
+    await updateUser({ aiSettings: v }).unwrap();
+    message.success('AI settings saved');
+  };
+
+  if (isLoading) return <Spin tip="Loading AI settings…" />;
+
+  const TOGGLES = [
+    { key: 'enableAIResumeParsing', label: 'AI Resume Parsing', desc: 'Use Claude AI to extract name, email, phone and skills from resumes. Falls back to rule-based parsing when off.' },
+    { key: 'enableResumeScreening', label: 'AI Resume Screening', desc: 'Auto-score resumes against JD' },
+    { key: 'enableJdGeneration', label: 'JD Generation', desc: 'Generate job descriptions with AI' },
+    { key: 'enableCandidateSummary', label: 'Candidate Summary', desc: 'Auto-summarise candidate profiles' },
+    { key: 'enableExamGeneration', label: 'Generate Exam', desc: 'Auto-Generate L1 Exam' },
+  ];
+
+  return (
+    <div style={{ maxWidth: 680 }}>
+      <div style={{ marginBottom: 20 }}>
+        <Title level={5} style={{ margin: 0 }}>AI & Language Model Settings</Title>
+        <Text type="secondary">Control AI-powered features and token usage</Text>
+      </div>
+      <Form form={form} layout="vertical">
+        <Card style={{ borderRadius: 10, marginBottom: 16 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+            <Form.Item name="model" label="Model" style={{ marginBottom: 0 }}>
+              <Select options={[
+                { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
+                { value: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5' },
+                { value: 'claude-opus-4-8', label: 'Claude Opus 4.8' },
+              ]} style={{ width: '100%' }} />
+            </Form.Item>
+            <Form.Item name="tokenLimit" label="Token Limit" style={{ marginBottom: 0 }}>
+              <InputNumber min={256} max={8192} step={256} style={{ width: '100%' }} formatter={(v) => `${v} tokens`} parser={(v) => parseInt(v.replace(' tokens', ''), 10)} />
+            </Form.Item>
+            <Form.Item name="temperature" label="Temperature (creativity)" style={{ marginBottom: 0 }}>
+              <InputNumber min={0} max={1} step={0.1} style={{ width: '100%' }} />
+            </Form.Item>
+          </div>
+        </Card>
+
+        <Card style={{ borderRadius: 10, marginBottom: 16 }}>
+          <Title level={5} style={{ marginTop: 0 }}>Feature Toggles</Title>
+          {TOGGLES.map(({ key, label, desc }) => (
+            <Form.Item key={key} name={key} valuePropName="checked" style={{ marginBottom: 0 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 0', borderBottom: '1px solid #f0f0f0' }}>
+                <div>
+                  <Text strong>{label}</Text>
+                  <br />
+                  <Text type="secondary" style={{ fontSize: 12 }}>{desc}</Text>
+                </div>
+                <Form.Item name={key} valuePropName="checked" noStyle>
+                  <Switch />
+                </Form.Item>
+              </div>
+            </Form.Item>
+          ))}
+        </Card>
+
+        <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={onSave} style={{ backgroundColor: '#2563eb' }}>
+          Save AI Settings
+        </Button>
+      </Form>
+    </div>
+  );
+};
+
 // ─── System Settings Tab (admin only) ────────────────────────────────────────
 const SystemSettingsTab = () => {
   const { data: sysData, isLoading } = useGetSystemSettingsQuery();
@@ -643,54 +679,6 @@ const UserSettingsTab = ({ onSettingsChange }) => {
 // ─── Main Settings Component ──────────────────────────────────────────────────
 const Settings = ({ onSettingsChange }) => {
   const { isAdmin } = useAuth();
-  const [settings, setSettings] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [dirty, setDirty] = useState(false);
-
-  useEffect(() => {
-    loadSettings().then((data) => {
-      setSettings(data);
-      setLoading(false);
-    });
-  }, []);
-
-  const update = (path, value) => {
-    setSettings((prev) => {
-      const next = structuredClone(prev);
-      const keys = path.split('.');
-      let obj = next;
-      for (let i = 0; i < keys.length - 1; i++) obj = obj[keys[i]];
-      obj[keys[keys.length - 1]] = value;
-      return next;
-    });
-    setDirty(true);
-  };
-
-  const handleSave = async () => {
-    setSaving(true);
-    await new Promise((r) => setTimeout(r, 900));
-    setSaving(false);
-    setDirty(false);
-    message.success('Settings saved successfully');
-  };
-
-  const handleReset = async () => {
-    setLoading(true);
-    const data = await loadSettings();
-    setSettings(data);
-    setLoading(false);
-    setDirty(false);
-    message.info('Settings reloaded');
-  };
-
-  if (loading) {
-    return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 300 }}>
-        <Spin size="large" tip="Loading configuration…" />
-      </div>
-    );
-  }
 
   const tabItems = [
     // My Preferences
@@ -698,64 +686,6 @@ const Settings = ({ onSettingsChange }) => {
       key: 'myPreferences',
       label: <Space><UserOutlined />My Preferences</Space>,
       children: <UserSettingsTab onSettingsChange={onSettingsChange} />,
-    },
-
-    // Email
-    {
-      key: 'email',
-      label: (
-        <Space>
-          <MailOutlined />
-          Email
-          {settings.email.enabled
-            ? <CheckCircleOutlined style={{ color: '#52c41a', fontSize: 12 }} />
-            : <CloseCircleOutlined style={{ color: '#bbb', fontSize: 12 }} />}
-        </Space>
-      ),
-      children: (
-        <div style={{ maxWidth: 680 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-            <div>
-              <Title level={5} style={{ margin: 0 }}>Email Communication</Title>
-              <Text type="secondary">Configure outbound email for candidate notifications</Text>
-            </div>
-            <Space>
-              <Text type="secondary">Enable email</Text>
-              <Switch
-                checked={settings.email.enabled}
-                onChange={(v) => update('email.enabled', v)}
-                checkedChildren="ON"
-                unCheckedChildren="OFF"
-              />
-            </Space>
-          </div>
-
-          {/* SMTP — admin only */}
-          {isAdmin ? <SmtpCard /> : <AdminLockedCard title="SMTP Configuration" />}
-
-          {/* Email Templates — all users */}
-          <Card style={{ borderRadius: 10 }}>
-            <Title level={5} style={{ marginTop: 0 }}>Email Templates</Title>
-            <Paragraph type="secondary" style={{ fontSize: 13 }}>
-              Choose which automated emails are sent to candidates
-            </Paragraph>
-            {Object.entries(settings.email.templates).map(([key, val]) => {
-              const labels = {
-                interviewInvite: 'Interview Invitation',
-                offerLetter: 'Offer Letter',
-                rejection: 'Rejection Notice',
-                applicationConfirmation: 'Application Confirmation',
-              };
-              return (
-                <div key={key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid #f0f0f0' }}>
-                  <Text>{labels[key]}</Text>
-                  <Switch size="small" disabled={!settings.email.enabled} checked={val} onChange={(v) => update(`email.templates.${key}`, v)} />
-                </div>
-              );
-            })}
-          </Card>
-        </div>
-      ),
     },
 
     // Job Boards
@@ -769,56 +699,7 @@ const Settings = ({ onSettingsChange }) => {
     {
       key: 'ai',
       label: <Space><RobotOutlined />AI / LLM</Space>,
-      children: (
-        <div style={{ maxWidth: 680 }}>
-          <div style={{ marginBottom: 20 }}>
-            <Title level={5} style={{ margin: 0 }}>AI & Language Model Settings</Title>
-            <Text type="secondary">Control AI-powered features and token usage</Text>
-          </div>
-
-          <Card style={{ borderRadius: 10, marginBottom: 16 }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-              <Form.Item label="Model" style={{ marginBottom: 0 }}>
-                <Select
-                  value={settings.aiSettings.model}
-                  onChange={(v) => update('aiSettings.model', v)}
-                  options={[
-                    { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
-                    { value: 'claude-haiku-4-5', label: 'Claude Haiku 4.5' },
-                    { value: 'claude-opus-4-6', label: 'Claude Opus 4.6' },
-                  ]}
-                  style={{ width: '100%' }}
-                />
-              </Form.Item>
-              <Form.Item label="Token Limit" style={{ marginBottom: 0 }}>
-                <InputNumber min={256} max={8192} step={256} value={settings.aiSettings.tokenLimit} onChange={(v) => update('aiSettings.tokenLimit', v)} style={{ width: '100%' }} formatter={(v) => `${v} tokens`} parser={(v) => parseInt(v.replace(' tokens', ''), 10)} />
-              </Form.Item>
-              <Form.Item label="Temperature (creativity)" style={{ marginBottom: 0 }}>
-                <InputNumber min={0} max={1} step={0.1} value={settings.aiSettings.temperature} onChange={(v) => update('aiSettings.temperature', v)} style={{ width: '100%' }} />
-              </Form.Item>
-            </div>
-          </Card>
-
-          <Card style={{ borderRadius: 10 }}>
-            <Title level={5} style={{ marginTop: 0 }}>Feature Toggles</Title>
-            {[
-              { key: 'enableResumeScreening', label: 'AI Resume Screening', desc: 'Auto-score resumes against JD' },
-              { key: 'enableJdGeneration', label: 'JD Generation', desc: 'Generate job descriptions with AI' },
-              { key: 'enableCandidateSummary', label: 'Candidate Summary', desc: 'Auto-summarise candidate profiles' },
-              { key: 'enableExamGeneration', label: 'Generate Exam', desc: 'Auto-Generate L1 Exam' },
-            ].map(({ key, label, desc }) => (
-              <div key={key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 0', borderBottom: '1px solid #f0f0f0' }}>
-                <div>
-                  <Text strong>{label}</Text>
-                  <br />
-                  <Text type="secondary" style={{ fontSize: 12 }}>{desc}</Text>
-                </div>
-                <Switch checked={settings.aiSettings[key]} onChange={(v) => update(`aiSettings.${key}`, v)} />
-              </div>
-            ))}
-          </Card>
-        </div>
-      ),
+      children: <AISettingsTab />,
     },
 
     // System Settings (admin only)
@@ -836,13 +717,6 @@ const Settings = ({ onSettingsChange }) => {
           <Title level={4} style={{ margin: 0 }}>Configuration</Title>
           <Text type="secondary">Manage your ATS integrations and system preferences</Text>
         </div>
-        <Space>
-          {dirty && <Alert message="Unsaved changes" type="warning" showIcon style={{ padding: '2px 12px', borderRadius: 6 }} />}
-          <Button icon={<ReloadOutlined />} onClick={handleReset}>Reset</Button>
-          <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={handleSave} disabled={!dirty}>
-            Save Changes
-          </Button>
-        </Space>
       </div>
 
       <Tabs items={tabItems} type="card" />

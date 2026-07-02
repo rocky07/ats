@@ -45,7 +45,8 @@
     "temperature": 0.7,
     "enableResumeScreening": true,
     "enableJdGeneration": true,
-    "enableCandidateSummary": true
+    "enableCandidateSummary": true,
+    "enableAIResumeParsing": false
   },
   "general": {
     "timezone": "Asia/Kolkata",
