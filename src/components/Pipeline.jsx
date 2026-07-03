@@ -5,6 +5,7 @@ import { useGetRequirementsQuery } from '../redux/requirementsApi';
 import { useGetPipelineStagesQuery, useSavePipelineStagesMutation } from '../redux/pipelineStagesApi';
 import { useGetAllCandidatesQuery } from '../redux/candidateApi';
 import { useRankCandidatesMutation } from '../redux/intelligenceApi';
+import { useGetUserSettingsQuery } from '../redux/settingsApi';
 import {
   useGenerateExamMutation,
   useGetExamByRequirementQuery,
@@ -53,10 +54,11 @@ const SAMPLE_EXAM = {
 const Pipeline = ({ reqId = null, region = 'global', onBack = null, backLabel = 'Back' }) => {
   const { data: requirements, isLoading } = useGetRequirementsQuery();
   const { data: candidateList = [] } = useGetAllCandidatesQuery();
+  const {data: userSettings} = useGetUserSettingsQuery();
   const [selectedReqId, setSelectedReqId] = useState(reqId);
   const [showAllPostings, setShowAllPostings] = useState(false); // default: open postings only
   const [compact, setCompact] = useState(false); // compact card view for long lists
-
+  const isGenerateExamEnabled = userSettings?.aiSettings?.enableExamGeneration ?? true;
   // Preselect the requirement when navigated here from "View Pipeline"
   useEffect(() => {
     if (reqId != null) setSelectedReqId(reqId);
@@ -393,15 +395,27 @@ const Pipeline = ({ reqId = null, region = 'global', onBack = null, backLabel = 
           </Tooltip>
         </div>
         <div style={{ display: 'flex', gap: 12 }}>
-          <Dropdown menu={{ items: examMenuItems, onClick: handleExamMenuClick }} trigger={['click']}>
-            <Button loading={isGeneratingExam} style={{ height: 40, paddingInline: 20 }}>
-              <Space>
-                {currentExam ? '✅ Exam Ready' : 'Online Exam'}
-                <DownOutlined />
-              </Space>
-            </Button>
-          </Dropdown>
-          
+        <Tooltip title={isGenerateExamEnabled ? 'Auto-generate L1 exam using AI' : 'AI Exam Generation is disabled in Settings'}>
+            <span>
+              <Dropdown
+                menu={{ items: examMenuItems, onClick: handleExamMenuClick }}
+                trigger={['click']}
+                disabled={!isGenerateExamEnabled}
+              >
+                <Button
+                  disabled={!isGenerateExamEnabled}
+                  type={currentExam ? 'default' : 'primary'}
+                  size="small"
+                  loading={isGeneratingExam}
+                  style={{ height: 40, paddingInline: 20 }}>
+                  <Space>
+                    {currentExam ? '✅ Exam Ready' : 'Online Exam'}
+                    <DownOutlined />
+                  </Space>
+                </Button>
+              </Dropdown>
+            </span>
+          </Tooltip>
           <Button
             icon={<TeamOutlined />}
             onClick={() => setDrawerOpen(true)}

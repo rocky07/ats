@@ -417,7 +417,7 @@ const AISettingsTab = () => {
       tokenLimit: userData.aiSettings?.tokenLimit ?? 4096,
       temperature: userData.aiSettings?.temperature ?? 0.7,
       enableAIResumeParsing: userData.aiSettings?.enableAIResumeParsing ?? false,
-      enableResumeScreening: userData.aiSettings?.enableResumeScreening ?? true,
+      enableResumeScreening: userData.aiSettings?.enableResumeScreening ?? false,
       enableJdGeneration: userData.aiSettings?.enableJdGeneration ?? true,
       enableCandidateSummary: userData.aiSettings?.enableCandidateSummary ?? true,
       enableExamGeneration: userData.aiSettings?.enableExamGeneration ?? true,
@@ -476,7 +476,13 @@ const AISettingsTab = () => {
                   <Text type="secondary" style={{ fontSize: 12 }}>{desc}</Text>
                 </div>
                 <Form.Item name={key} valuePropName="checked" noStyle>
-                  <Switch />
+                  <Switch
+                    onChange={(checked) => {
+                      if (key === 'enableAIResumeParsing') {
+                        form.setFieldValue('enableCandidateSummary', checked);
+                      }
+                    }}
+                  />
                 </Form.Item>
               </div>
             </Form.Item>

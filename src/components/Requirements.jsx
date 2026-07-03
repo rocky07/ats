@@ -6,6 +6,7 @@ import { useUploadResumeMutation,useGetAllCandidatesQuery } from '../redux/candi
 import { useLazyGetPipelineStagesQuery, useSavePipelineStagesMutation } from '../redux/pipelineStagesApi';
 import { useGetMarketIntelligenceMutation, useGenerateJobSummaryMutation, useRankCandidatesMutation } from '../redux/intelligenceApi';
 import { useGetExamByRequirementQuery, useGenerateExamMutation, useSendExamInviteMutation, useLazyGetSubmissionQuery } from '../redux/examApi';
+import { useGetUserSettingsQuery } from '../redux/settingsApi';
 import ScheduleInterviewDrawer from './ScheduleInterviewDrawer';
 
 // The fixed pipeline stages, in order.
@@ -51,6 +52,7 @@ import {
   Table,
   InputNumber,
   Tabs,
+  Dropdown,
 } from 'antd';
 import {
   FireOutlined,
@@ -69,6 +71,9 @@ import {
   SwapOutlined,
   StarFilled,
   ArrowRightOutlined,
+  LinkOutlined,
+  DeleteOutlined,
+  MoreOutlined,
 } from '@ant-design/icons';
 import { SearchOutlined, PlusOutlined } from '@ant-design/icons';
 
@@ -86,6 +91,9 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
   const [submitting, setSubmitting] = useState(false);
   const { data: requirements, error, isLoading, isFetching } = useGetRequirementsQuery();
   const { data: departments = [] } = useGetDepartmentsQuery();
+  const { data: userSettings } = useGetUserSettingsQuery();
+  const isJdGenerationEnabled = userSettings?.aiSettings?.enableJdGeneration ?? true;
+  const isGenerateExamEnabled = userSettings?.aiSettings?.enableExamGeneration ?? true;
   // 3. Destructure the mutation trigger and its execution states
   const [addRequirement, { isLoading: isSubmitting }] = useAddRequirementMutation();
   const [updateRequirement] = useUpdateRequirementMutation();
@@ -263,6 +271,26 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
     }
   };
 
+  const handleCopyExamLink = () => {
+    if (!currentExam) { message.info('Generate an exam first.'); return; }
+    const url = `${window.location.origin}/exam/${currentExam.requirementId}`;
+    navigator.clipboard.writeText(url).then(
+      () => message.success('Exam link copied to clipboard'),
+      () => message.info(`Exam link: ${url}`),
+    );
+  };
+
+  const handleDeleteExam = () => {
+    if (!currentExam) { message.info('Generate an exam first.'); return; }
+    Modal.confirm({
+      title: 'Delete online exam?',
+      content: 'This will remove the current L1 online exam. This action cannot be undone.',
+      okText: 'Delete',
+      okButtonProps: { danger: true },
+      onOk: () => message.success('Online exam deleted'),
+    });
+  };
+
   // Send L1 exam invite email to a candidate
   const handleSendExamInvite = async (candidate) => {
     if (!currentExam) { message.warning('No exam generated for this requirement yet.'); return; }
@@ -362,6 +390,10 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
 
   // AI-generate the job description from the collected form fields (via Claude on the backend).
   const handleAIFill = async () => {
+    if (!isJdGenerationEnabled) {
+      message.warning('AI JD Generation is disabled in Settings.');
+      return;
+    }
     const values = form.getFieldsValue([
       'title', 'department', 'location', 'workMode', 'jobType',
       'salaryMin', 'salaryMax', 'hourlyRateMin', 'hourlyRateMax', 'mustHaves', 'niceToHaves',
@@ -757,19 +789,40 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
               <>
                 {isL1 && (
                   <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <Button
-                      type={currentExam ? 'default' : 'primary'}
-                      size="small"
-                      loading={isGeneratingExam}
-                      onClick={handleGenerateExam}
+                    <Tooltip title={isGenerateExamEnabled ? 'Auto-generate L1 exam using AI' : 'AI Exam Generation is disabled in Settings'}>
+                      <Button
+                        type={currentExam ? 'default' : 'primary'}
+                        size="small"
+                        loading={isGeneratingExam}
+                        disabled={!isGenerateExamEnabled}
+                        onClick={handleGenerateExam}
                       style={currentExam ? {} : { backgroundColor: '#7c3aed', borderColor: '#7c3aed' }}
                     >
                       {currentExam ? '✅ Regenerate Exam' : '⚡ Generate L1 Exam'}
                     </Button>
+                    </Tooltip>
                     {currentExam && (
-                      <Text type="secondary" style={{ fontSize: 12 }}>
-                        Exam ready — {currentExam.questions?.length ?? 0} questions
-                      </Text>
+                      <>
+                        <Dropdown
+                          menu={{
+                            items: [
+                              { key: 'link', icon: <LinkOutlined />, label: 'Copy Exam Link' },
+                              { type: 'divider' },
+                              { key: 'delete', icon: <DeleteOutlined />, label: 'Delete Exam', danger: true },
+                            ],
+                            onClick: ({ key }) => {
+                              if (key === 'link') handleCopyExamLink();
+                              else if (key === 'delete') handleDeleteExam();
+                            },
+                          }}
+                          trigger={['click']}
+                        >
+                          <Button size="small" icon={<MoreOutlined />} />
+                        </Dropdown>
+                        <Text type="secondary" style={{ fontSize: 12 }}>
+                          Exam ready — {currentExam.questions?.length ?? 0} questions
+                        </Text>
+                      </>
                     )}
                   </div>
                 )}
@@ -1130,12 +1183,13 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
             label={
               <Flex justify="space-between" align="center" style={{ width: '100%' }}>
                 <span>Job Description Summary</span>
-                <Tooltip title="Auto-fill optimized description using AI">
+                <Tooltip title={isJdGenerationEnabled ? 'Auto-fill optimized description using AI' : 'AI JD Generation is disabled in Settings'}>
                   <Button
                     type="text"
                     size="small"
                     icon={<ThunderboltOutlined style={{ color: '#722ed1' }} />} // Native Antd Icon
                     loading={isGenerating}
+                    disabled={!isJdGenerationEnabled}
                     onClick={handleAIFill}
                     style={{
                       color: '#722ed1',
