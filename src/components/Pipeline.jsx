@@ -350,7 +350,9 @@ const Pipeline = ({ reqId = null, region = 'global', onBack = null, backLabel = 
 
   const isOpenPosting = (req) => (req.status ?? 'open') === 'open';
   const visibleRequirements = (requirements ?? []).filter(
-    (req) => showAllPostings || isOpenPosting(req) || String(req.id) === String(selectedReqId)
+    (req) =>
+      (region === 'global' || (req.regions ?? []).includes(region)) &&
+      (showAllPostings || isOpenPosting(req) || String(req.id) === String(selectedReqId))
   );
 
   const filteredDb = candidateList.filter((c) => {

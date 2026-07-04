@@ -85,7 +85,7 @@ const { TextArea } = Input;
 const STAGE_LABELS = { ingested: 'Ingested', ranked: 'Ranked', l1: 'L1 (Exam)', l2: 'L2 (Recruiter)', l3: 'L3 (Final)' };
 const STAGE_COLORS = { ingested: 'blue', ranked: 'gold', l1: 'purple', l2: 'cyan', l3: 'green' };
 
-const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqIdConsumed }) => {
+const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqIdConsumed, region = 'global' }) => {
   // State management for Modal visibility and submitting loader
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -94,6 +94,7 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
   const { data: userSettings } = useGetUserSettingsQuery();
   const isJdGenerationEnabled = userSettings?.aiSettings?.enableJdGeneration ?? true;
   const isGenerateExamEnabled = userSettings?.aiSettings?.enableExamGeneration ?? true;
+  const isMarketIntelligenceEnabled = userSettings?.aiSettings?.enableMarketIntelligence ?? true;
   // 3. Destructure the mutation trigger and its execution states
   const [addRequirement, { isLoading: isSubmitting }] = useAddRequirementMutation();
   const [updateRequirement] = useUpdateRequirementMutation();
@@ -141,7 +142,7 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
       jobType &&
       watchedMustHaves?.length > 0;
 
-    if (!allFilled || !isModalOpen) return;
+    if (!allFilled || !isModalOpen || !isMarketIntelligenceEnabled) return;
 
     const timer = setTimeout(async () => {
       try {
@@ -159,7 +160,7 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
     }, 800); // debounce so it doesn't fire on every keystroke
 
     return () => clearTimeout(timer);
-  }, [watchedTitle, watchedMustHaves, watchedLocation, watchedWorkMode, jobType, isModalOpen]);
+  }, [watchedTitle, watchedMustHaves, watchedLocation, watchedWorkMode, jobType, isModalOpen, isMarketIntelligenceEnabled]);
 
   // Auto-open View Details when returning from Pipeline via Back button
   useEffect(() => {
@@ -179,7 +180,9 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
   const STATUS_COLOR = { open: 'green', draft: 'default', closed: 'red' };
   const isOpenRequirement = (req) => getStatus(req) === 'open';
   const visibleRequirements = (requirements ?? []).filter(
-    (req) => statusFilter === 'all' || getStatus(req) === statusFilter
+    (req) =>
+      (statusFilter === 'all' || getStatus(req) === statusFilter) &&
+      (region === 'global' || (req.regions ?? []).includes(region))
   );
 
   // --- View Details modal: applicants & pipeline state ---
@@ -1210,7 +1213,8 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
           </Form.Item>
 
         {/* Live Market Intelligence Section */}
-        <Card 
+        {isMarketIntelligenceEnabled && (
+        <Card
           style={{ marginTop: 24, backgroundColor: '#fafafa', border: '1px solid #f0f0f0' }}
           bodyStyle={{ padding: 16 }}
         >
@@ -1298,6 +1302,7 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
 
           </Flex>
         </Card>
+        )}
 
           {/* Form Action Controls */}
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, marginTop: 24 }}>

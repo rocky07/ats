@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { API_BASE_URL } from './config';
 import { REGION_OPTIONS } from './constants/regions';
 import { useAuth, getStoredToken } from './auth/AuthContext';
+import { useGetUserSettingsQuery } from './redux/settingsApi';
 import LoginPage from './pages/LoginPage';
 import { 
   Layout, 
@@ -310,6 +311,12 @@ const App = () => {
   const [pipelineReqId, setPipelineReqId] = useState(null);
   const [returnToReqId, setReturnToReqId] = useState(null); // req to re-open in Requirements on back
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const { data: userSettings } = useGetUserSettingsQuery(undefined, { skip: !isAuthenticated });
+
+  // Apply the user's saved default region once, on login.
+  useEffect(() => {
+    if (userSettings?.defaultRegion) setRegion(userSettings.defaultRegion);
+  }, [userSettings?.defaultRegion]);
 
   if (loading) {
     return (
@@ -474,13 +481,14 @@ const App = () => {
         </Header>
 
         <Content style={{ margin: '24px 24px', flex: 1, overflowY: 'auto' }}>
-          {selectedMenu === '1' && <Dashboard />}
+          {selectedMenu === '1' && <Dashboard region={region} />}
           {selectedMenu === '3' && (
             <Requirements
               onViewPipeline={handleViewPipeline}
               onViewInPipeline={handleViewInPipeline}
               openReqId={returnToReqId}
               onOpenReqIdConsumed={() => setReturnToReqId(null)}
+              region={region}
             />
           )}
           {selectedMenu === '2' && <Candidates />}

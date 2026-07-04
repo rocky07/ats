@@ -24,8 +24,8 @@ const ACTIVITY_ICONS = {
   interview: <CalendarOutlined />,
 };
 
-const Dashboard = () => {
-  const { data, isLoading, isError } = useGetDashboardQuery(undefined, { pollingInterval: 30000 });
+const Dashboard = ({ region = 'global' }) => {
+  const { data, isLoading, isError } = useGetDashboardQuery(region, { pollingInterval: 30000 });
 
   // First-ever load with no cached data yet
   if (isLoading && !data) {

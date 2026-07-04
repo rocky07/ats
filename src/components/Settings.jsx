@@ -32,6 +32,7 @@ import {
   LinkedinOutlined,
 } from '@ant-design/icons';
 import { useAuth, getStoredToken } from '../auth/AuthContext';
+import { REGION_OPTIONS } from '../constants/regions';
 import {
   useGetSystemSettingsQuery,
   useUpdateSystemSettingsMutation,
@@ -421,6 +422,7 @@ const AISettingsTab = () => {
       enableJdGeneration: userData.aiSettings?.enableJdGeneration ?? true,
       enableCandidateSummary: userData.aiSettings?.enableCandidateSummary ?? true,
       enableExamGeneration: userData.aiSettings?.enableExamGeneration ?? true,
+      enableMarketIntelligence: userData.aiSettings?.enableMarketIntelligence ?? true,
     });
   }, [userData]);
 
@@ -438,6 +440,7 @@ const AISettingsTab = () => {
     { key: 'enableJdGeneration', label: 'JD Generation', desc: 'Generate job descriptions with AI' },
     { key: 'enableCandidateSummary', label: 'Candidate Summary', desc: 'Auto-summarise candidate profiles' },
     { key: 'enableExamGeneration', label: 'Generate Exam', desc: 'Auto-Generate L1 Exam' },
+    { key: 'enableMarketIntelligence', label: 'Live Dice Market Intelligence', desc: 'Auto-fetch live market data (supply, salary, velocity) while creating a requirement' },
   ];
 
   return (
@@ -593,7 +596,7 @@ const UserSettingsTab = ({ onSettingsChange }) => {
     if (userData) form.setFieldsValue({
       timezone: userData.timezone,
       language: userData.language,
-      compactMode: userData.compactMode,
+      defaultRegion: userData.defaultRegion ?? 'global',
       examSubmitted: userData.emailNotifications?.examSubmitted,
       interviewScheduled: userData.emailNotifications?.interviewScheduled,
       candidateMoved: userData.emailNotifications?.candidateMoved,
@@ -606,7 +609,7 @@ const UserSettingsTab = ({ onSettingsChange }) => {
     await updateUser({
       timezone: v.timezone,
       language: v.language,
-      compactMode: v.compactMode,
+      defaultRegion: v.defaultRegion,
       emailNotifications: {
         examSubmitted: v.examSubmitted,
         interviewScheduled: v.interviewScheduled,
@@ -645,20 +648,14 @@ const UserSettingsTab = ({ onSettingsChange }) => {
             </Form.Item>
             <Form.Item name="language" label="Language">
               <Select options={[
-                { value: 'en', label: 'English' },
-                { value: 'es', label: 'Spanish' },
-                { value: 'fr', label: 'French' },
+                { value: 'en', label: 'English' }
               ]} />
             </Form.Item>
+            <Form.Item name="defaultRegion" label="Default Region">
+              <Select options={REGION_OPTIONS} />
+            </Form.Item>
           </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 8 }}>
-            <div>
-              <Text strong>Compact pipeline cards</Text>
-              <br />
-              <Text type="secondary" style={{ fontSize: 12 }}>Show condensed candidate cards in the Kanban board</Text>
-            </div>
-            <Form.Item name="compactMode" valuePropName="checked" noStyle><Switch /></Form.Item>
-          </div>
+          <Text type="secondary" style={{ fontSize: 12 }}>The region selected automatically each time you log in</Text>
         </Card>
 
         <Card title={<Space><BellOutlined />Email Notifications</Space>} style={{ borderRadius: 10, marginBottom: 16 }}>

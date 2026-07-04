@@ -6,7 +6,7 @@ export const dashboardApi = createApi({
   baseQuery: baseQueryWithAuth,
   endpoints: (build) => ({
     getDashboard: build.query({
-      query: () => '/dashboard',
+      query: (region = 'global') => `/dashboard?region=${region}`,
     }),
   }),
 });
