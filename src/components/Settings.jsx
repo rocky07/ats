@@ -72,6 +72,16 @@ const PersonalLinkedInCard = () => {
   const li = userData?.personalLinkedin ?? {};
   const isConnected = !!(li.enabled && li.accessToken && li.linkedinUrn);
   const tokenExpired = li.tokenExpiry && Date.now() > li.tokenExpiry;
+  const autoPostOnCreate = li.autoPostOnCreate ?? true;
+
+  const handleAutoPostToggle = async (checked) => {
+    try {
+      await updateUser({ personalLinkedin: { ...li, autoPostOnCreate: checked } }).unwrap();
+      message.success(checked ? 'New requirements will auto-post to LinkedIn' : 'Auto-posting to LinkedIn disabled');
+    } catch {
+      message.error('Failed to update preference');
+    }
+  };
 
   // Check for ?linkedin= query param on mount (redirect back from OAuth)
   useEffect(() => {
@@ -145,6 +155,18 @@ const PersonalLinkedInCard = () => {
               Re-authenticate
             </Button>
           </Space>
+          <div style={{
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+            padding: '10px 14px', borderRadius: 8, border: '1px solid #f0f0f0', width: '100%',
+          }}>
+            <Space direction="vertical" size={0}>
+              <Text strong style={{ fontSize: 13 }}>Auto-post new requirements</Text>
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                Automatically post to your LinkedIn feed whenever a new job requirement is created
+              </Text>
+            </Space>
+            <Switch checked={autoPostOnCreate} onChange={handleAutoPostToggle} checkedChildren="ON" unCheckedChildren="OFF" />
+          </div>
         </Space>
       ) : (
         <Space direction="vertical" style={{ width: '100%' }}>

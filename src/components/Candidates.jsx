@@ -1,11 +1,12 @@
 import React, { useRef, useState } from 'react';
 import { Button, Card, Input, Space, Pagination, message, Spin, Modal, Descriptions, Tag, Tooltip } from 'antd';
-import { SearchOutlined, UploadOutlined, DownloadOutlined } from '@ant-design/icons';
+import { SearchOutlined, UploadOutlined, DownloadOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import {
   useGetAllCandidatesQuery,
   useUploadResumeMutation,
   useDeleteCandidateMutation,
   useGetResumeUrlQuery,
+  useReparseWithAiMutation,
 } from '../redux/candidateApi';
 
 const ResumeDownloadButton = ({ candidateId }) => {
@@ -42,12 +43,23 @@ const Candidates = () => {
   const { data: candidates = [], isLoading, isFetching } = useGetAllCandidatesQuery();
   const [uploadResume, { isLoading: isUploading }] = useUploadResumeMutation();
   const [deleteCandidate] = useDeleteCandidateMutation();
+  const [reparseWithAi, { isLoading: isReparsingWithAi }] = useReparseWithAiMutation();
 
   const handleUploadClick = () => fileInputRef.current?.click();
 
   const handleViewProfile = (candidate) => {
     setSelectedCandidate(candidate);
     setIsModalOpen(true);
+  };
+
+  const handleReparseWithAi = async () => {
+    try {
+      const updated = await reparseWithAi(selectedCandidate.id).unwrap();
+      setSelectedCandidate(updated);
+      message.success('Resume parsed with Claude — profile updated');
+    } catch (e) {
+      message.error(e?.data?.error ?? 'Failed to parse resume with Claude');
+    }
   };
 
   const handleCloseModal = () => {
@@ -250,6 +262,19 @@ const Candidates = () => {
           selectedCandidate?.resumeS3Key
             ? <ResumeDownloadButton key="download" candidateId={selectedCandidate.id} />
             : null,
+          <Tooltip
+            key="parse-tooltip"
+            title={selectedCandidate?.aiParsed ? 'Already parsed with Claude' : (!selectedCandidate?.resumeS3Key ? 'No resume on file' : '')}
+          >
+            <Button
+              icon={<ThunderboltOutlined />}
+              loading={isReparsingWithAi}
+              disabled={!!selectedCandidate?.aiParsed || !selectedCandidate?.resumeS3Key}
+              onClick={handleReparseWithAi}
+            >
+              Parse with Claude
+            </Button>
+          </Tooltip>,
           <Button key="close" type="primary" onClick={handleCloseModal}>
             Close
           </Button>,

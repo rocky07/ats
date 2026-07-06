@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { REGION_OPTIONS } from '../constants/regions';
 import dayjs from 'dayjs';
-import { useGetRequirementsQuery, useAddRequirementMutation, useUpdateRequirementMutation, useGetDepartmentsQuery } from '../redux/requirementsApi';
+import { useGetRequirementsQuery, useAddRequirementMutation, useUpdateRequirementMutation, useGetDepartmentsQuery, useShareRequirementMutation } from '../redux/requirementsApi';
+import { useGetVendorsQuery, useGetGroupsQuery } from '../redux/vendorApi';
 import { useUploadResumeMutation,useGetAllCandidatesQuery } from '../redux/candidateApi';
 import { useLazyGetPipelineStagesQuery, useSavePipelineStagesMutation } from '../redux/pipelineStagesApi';
 import { useGetMarketIntelligenceMutation, useGenerateJobSummaryMutation, useRankCandidatesMutation } from '../redux/intelligenceApi';
@@ -53,6 +54,9 @@ import {
   InputNumber,
   Tabs,
   Dropdown,
+  Checkbox,
+  Radio,
+  Rate,
 } from 'antd';
 import {
   FireOutlined,
@@ -74,6 +78,9 @@ import {
   LinkOutlined,
   DeleteOutlined,
   MoreOutlined,
+  ShareAltOutlined,
+  LinkedinOutlined,
+  MailOutlined,
 } from '@ant-design/icons';
 import { SearchOutlined, PlusOutlined } from '@ant-design/icons';
 
@@ -185,6 +192,89 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
       (region === 'global' || (req.regions ?? []).includes(region))
   );
 
+  // --- Share Requirement (JD) modal state ---
+  const MAX_SHARE_RECIPIENTS = 20;
+  const [shareReq, setShareReq] = useState(null);
+  const [shareChannel, setShareChannel] = useState('vendors'); // 'vendors' | 'linkedin'
+  const [shareIncludeJd, setShareIncludeJd] = useState(true);
+  const [shareIncludeLink, setShareIncludeLink] = useState(true);
+  const [shareVendorEmails, setShareVendorEmails] = useState([]);
+  const [shareGroups, setShareGroups] = useState([]);
+  const [shareMessage, setShareMessage] = useState('');
+  const [shareJdText, setShareJdText] = useState('');
+  const { data: vendors = [] } = useGetVendorsQuery(undefined, { skip: !shareReq });
+  const { data: vendorGroups = [] } = useGetGroupsQuery(undefined, { skip: !shareReq });
+  const [shareRequirement, { isLoading: isSharing }] = useShareRequirementMutation();
+
+  const openShareModal = (req) => {
+    setShareReq(req);
+    setShareChannel('vendors');
+    setShareIncludeJd(true);
+    setShareIncludeLink(true);
+    setShareVendorEmails([]);
+    setShareGroups([]);
+    setShareMessage('');
+    setShareJdText(req?.description ?? '');
+  };
+
+  const getApplyUrl = (req) => `${window.location.origin}/apply/${req?.id}`;
+
+  // Adds every vendor belonging to the selected groups to the recipient list (capped, deduped).
+  const handleShareGroupsChange = (groups) => {
+    setShareGroups(groups);
+    const groupEmails = vendors
+      .filter((v) => v.email && groups.includes(v.group))
+      .map((v) => v.email);
+    const merged = Array.from(new Set([...shareVendorEmails, ...groupEmails]));
+    if (merged.length > MAX_SHARE_RECIPIENTS) {
+      message.warning(`Group selection exceeds the ${MAX_SHARE_RECIPIENTS}-recipient cap — only the first ${MAX_SHARE_RECIPIENTS} were added to avoid being flagged as spam`);
+    }
+    setShareVendorEmails(merged.slice(0, MAX_SHARE_RECIPIENTS));
+  };
+
+  const handleSendShare = async () => {
+    if (!shareVendorEmails.length) {
+      message.warning('Select at least one vendor');
+      return;
+    }
+    if (shareVendorEmails.length > MAX_SHARE_RECIPIENTS) {
+      message.warning(`You can share with at most ${MAX_SHARE_RECIPIENTS} vendors at a time to avoid being flagged as spam`);
+      return;
+    }
+    try {
+      await shareRequirement({
+        requirementId: shareReq.id,
+        channel: 'vendors',
+        vendorEmails: shareVendorEmails,
+        includeJd: shareIncludeJd,
+        includeUploadLink: shareIncludeLink,
+        jdText: shareJdText,
+        message: shareMessage,
+      }).unwrap();
+      message.success(`Job shared with ${shareVendorEmails.length} vendor(s)`);
+      setShareReq(null);
+    } catch (e) {
+      message.error(e?.data?.error ?? 'Failed to share job requirement');
+    }
+  };
+
+  const handleSendToLinkedIn = async () => {
+    try {
+      await shareRequirement({
+        requirementId: shareReq.id,
+        channel: 'linkedin',
+        includeJd: shareIncludeJd,
+        includeUploadLink: shareIncludeLink,
+        jdText: shareJdText,
+        message: shareMessage,
+      }).unwrap();
+      message.success('Posted to LinkedIn');
+      setShareReq(null);
+    } catch (e) {
+      message.error(e?.data?.error ?? 'Failed to post to LinkedIn');
+    }
+  };
+
   // --- View Details modal: applicants & pipeline state ---
   const [viewReq, setViewReq] = useState(null);
   const { data: currentExam } = useGetExamByRequirementQuery(viewReq?.id, { skip: !viewReq?.id });
@@ -230,7 +320,12 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
       if (cand) { handleRankCandidates([cand]); return; }
     }
     persistApplicants(viewReq.id, (list) =>
-      list.map((c) => (String(c.id) === String(candidateId) ? { ...c, stage: newStage } : c))
+      list.map((c) => {
+        if (String(c.id) !== String(candidateId)) return c;
+        // Moving to a different stage resets any interview rating from the previous round.
+        const { rating, ...rest } = c;
+        return { ...rest, stage: newStage };
+      })
     );
   };
 
@@ -332,6 +427,14 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
       savePipelineStages({ requirementId: reqId, stages: applicantsToStages(nextList) });
       return { ...prev, [reqId]: nextList };
     });
+  };
+
+  // Rate a candidate (L2/L3 interview rounds only) and persist it.
+  const handleRateApplicant = (candidateId, rating) => {
+    if (!viewReq) return;
+    persistApplicants(viewReq.id, (list) =>
+      list.map((c) => (String(c.id) === String(candidateId) ? { ...c, rating } : c))
+    );
   };
 
   // Add a candidate from the database into the Ingested stage
@@ -555,7 +658,7 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
                 View Details
               </Button>
               <Row gutter={8}>
-                <Col xs={16}>
+                <Col xs={12}>
                   <Button
                     block
                     onClick={() => onViewPipeline?.(req.id)}
@@ -564,13 +667,22 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
                     View Pipeline
                   </Button>
                 </Col>
-                <Col xs={8}>
+                <Col xs={6}>
                   <Button
                     onClick={() => showModal(req)}
                     style={{ borderColor: '#000', color: '#000', border: '1px solid #000', width: '100%', height: 40, background: 'transparent' }}
                   >
                     ✎
                   </Button>
+                </Col>
+                <Col xs={6}>
+                  <Tooltip title="Share with vendors / LinkedIn">
+                    <Button
+                      icon={<ShareAltOutlined />}
+                      onClick={() => openShareModal(req)}
+                      style={{ borderColor: '#000', color: '#000', border: '1px solid #000', width: '100%', height: 40, background: 'transparent' }}
+                    />
+                  </Tooltip>
                 </Col>
               </Row>
             </Card>
@@ -611,6 +723,9 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
                   <Button size="small" onClick={() => showModal(req)}>
                     Edit
                   </Button>
+                  <Button size="small" icon={<ShareAltOutlined />} onClick={() => openShareModal(req)}>
+                    Share
+                  </Button>
                 </Space>
               ),
             },
@@ -626,6 +741,9 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
         footer={
           <Space>
             <Button onClick={() => setViewReq(null)}>Close</Button>
+            <Button icon={<ShareAltOutlined />} onClick={() => openShareModal(viewReq)}>
+              Share
+            </Button>
             <Button
               type="primary"
               icon={<ArrowRightOutlined />}
@@ -855,7 +973,22 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
                       rowKey="id"
                       size="small"
                       dataSource={stageApplicants}
-                      columns={[...baseColumns, actionCol(stageKey)]}
+                      columns={[
+                        ...baseColumns,
+                        ...((stageKey === 'l2' || stageKey === 'l3') ? [{
+                          title: 'Rating',
+                          key: 'rating',
+                          width: 140,
+                          render: (_, c) => (
+                            <Rate
+                              value={c.rating ?? 0}
+                              onChange={(val) => handleRateApplicant(c.id, val)}
+                              style={{ fontSize: 14 }}
+                            />
+                          ),
+                        }] : []),
+                        actionCol(stageKey),
+                      ]}
                       pagination={false}
                       style={{ marginTop: isIngested ? 0 : 8 }}
                       {...selectionProps}
@@ -1320,6 +1453,159 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
             </Button>
           </div>
         </Form>
+      </Modal>
+
+      {/* --- Share Requirement Modal --- */}
+      <Modal
+        title={<Space><ShareAltOutlined /> Share "{shareReq?.title}"</Space>}
+        open={!!shareReq}
+        onCancel={() => setShareReq(null)}
+        destroyOnClose
+        footer={
+          shareChannel === 'vendors' ? (
+            <Space>
+              <Button onClick={() => setShareReq(null)}>Cancel</Button>
+              <Button
+                type="primary"
+                icon={<MailOutlined />}
+                loading={isSharing}
+                onClick={handleSendShare}
+                style={{ backgroundColor: '#2563eb' }}
+              >
+                Send to {shareVendorEmails.length || 0} Vendor(s)
+              </Button>
+            </Space>
+          ) : (
+            <Space>
+              <Button onClick={() => setShareReq(null)}>Cancel</Button>
+              <Button
+                type="primary"
+                icon={<LinkedinOutlined />}
+                loading={isSharing}
+                onClick={handleSendToLinkedIn}
+                style={{ backgroundColor: '#0a66c2' }}
+              >
+                Send
+              </Button>
+            </Space>
+          )
+        }
+      >
+        {shareReq && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <Radio.Group
+              value={shareChannel}
+              onChange={(e) => setShareChannel(e.target.value)}
+              optionType="button"
+              buttonStyle="solid"
+              options={[
+                { label: 'Vendors', value: 'vendors' },
+                { label: 'LinkedIn', value: 'linkedin' },
+              ]}
+            />
+
+            <div>
+              <Checkbox checked={shareIncludeJd} onChange={(e) => setShareIncludeJd(e.target.checked)} style={{ marginBottom: 8 }}>
+                Include Job Description
+              </Checkbox>
+              {shareIncludeJd && (
+                <TextArea
+                  rows={6}
+                  value={shareJdText}
+                  onChange={(e) => setShareJdText(e.target.value)}
+                  placeholder="Job description to share..."
+                />
+              )}
+            </div>
+
+            <div>
+              <Checkbox checked={shareIncludeLink} onChange={(e) => setShareIncludeLink(e.target.checked)}>
+                Include candidate upload / application link
+              </Checkbox>
+              {shareIncludeLink && (
+                <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
+                  {getApplyUrl(shareReq)}
+                </Text>
+              )}
+            </div>
+
+            {shareChannel === 'vendors' ? (
+              <>
+                <div>
+                  <Text strong style={{ display: 'block', marginBottom: 8 }}>Vendor groups</Text>
+                  <Select
+                    mode="multiple"
+                    placeholder="Pick group(s) to quickly add all their vendors"
+                    style={{ width: '100%' }}
+                    value={shareGroups}
+                    onChange={handleShareGroupsChange}
+                    options={vendorGroups.map((g) => ({ value: g, label: g }))}
+                  />
+                </div>
+                <div>
+                  <Text strong style={{ display: 'block', marginBottom: 8 }}>
+                    Share with vendors ({shareVendorEmails.length}/{MAX_SHARE_RECIPIENTS})
+                  </Text>
+                  <Select
+                    mode="multiple"
+                    placeholder="Select vendor(s) to email"
+                    style={{ width: '100%' }}
+                    value={shareVendorEmails}
+                    onChange={(vals) => {
+                      if (vals.length > MAX_SHARE_RECIPIENTS) {
+                        message.warning(`You can only select up to ${MAX_SHARE_RECIPIENTS} vendors at a time to avoid being flagged as spam`);
+                        return;
+                      }
+                      setShareVendorEmails(vals);
+                    }}
+                    options={vendors
+                      .filter((v) => v.email)
+                      .map((v) => ({ value: v.email, label: `${v.name} <${v.email}>` }))}
+                    optionFilterProp="label"
+                    tagRender={({ value, closable, onClose }) => {
+                      const vendor = vendors.find((v) => v.email === value);
+                      return (
+                        <Tag closable={closable} onClose={onClose} style={{ marginInlineEnd: 4 }}>
+                          {vendor?.name ?? value}
+                          {vendor?.group && (
+                            <Tag color="blue" style={{ marginLeft: 6, marginRight: 0 }}>
+                              {vendor.group}
+                            </Tag>
+                          )}
+                        </Tag>
+                      );
+                    }}
+                  />
+                  <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
+                    Limited to {MAX_SHARE_RECIPIENTS} recipients per share to avoid being flagged as spam.
+                  </Text>
+                </div>
+                <div>
+                  <Text strong style={{ display: 'block', marginBottom: 8 }}>Message (optional)</Text>
+                  <TextArea
+                    rows={3}
+                    placeholder="Add a note for the vendor(s)..."
+                    value={shareMessage}
+                    onChange={(e) => setShareMessage(e.target.value)}
+                  />
+                </div>
+              </>
+            ) : (
+              <div>
+                <Text strong style={{ display: 'block', marginBottom: 8 }}>Intro message (optional)</Text>
+                <TextArea
+                  rows={3}
+                  placeholder="e.g. Excited to share we're hiring for this role..."
+                  value={shareMessage}
+                  onChange={(e) => setShareMessage(e.target.value)}
+                />
+                <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
+                  Posts directly to your connected LinkedIn account (Settings → My Preferences).
+                </Text>
+              </div>
+            )}
+          </div>
+        )}
       </Modal>
     </>
   );

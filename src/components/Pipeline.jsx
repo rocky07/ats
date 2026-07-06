@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Button, Card, Typography, Select, Drawer, Input, Empty, message, Dropdown, Modal, Radio, Space, Tooltip, Segmented, Tag, Descriptions } from 'antd';
-import { PlusOutlined, TeamOutlined, SearchOutlined, DownOutlined, FileAddOutlined, DeleteOutlined, ShareAltOutlined, CopyOutlined, CompressOutlined, MailOutlined, CheckCircleOutlined, LinkOutlined, CalendarOutlined, ArrowLeftOutlined, UserOutlined } from '@ant-design/icons';
+import { Button, Card, Typography, Select, Drawer, Input, Empty, message, Dropdown, Modal, Radio, Space, Tooltip, Segmented, Tag, Descriptions, Rate } from 'antd';
+import { PlusOutlined, TeamOutlined, SearchOutlined, DownOutlined, FileAddOutlined, DeleteOutlined, ShareAltOutlined, CopyOutlined, CompressOutlined, MailOutlined, CheckCircleOutlined, LinkOutlined, CalendarOutlined, ArrowLeftOutlined, UserOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import { useGetRequirementsQuery } from '../redux/requirementsApi';
 import { useGetPipelineStagesQuery, useSavePipelineStagesMutation } from '../redux/pipelineStagesApi';
-import { useGetAllCandidatesQuery } from '../redux/candidateApi';
+import { useGetAllCandidatesQuery, useReparseWithAiMutation } from '../redux/candidateApi';
 import { useRankCandidatesMutation } from '../redux/intelligenceApi';
 import { useGetUserSettingsQuery } from '../redux/settingsApi';
 import {
@@ -94,6 +94,18 @@ const Pipeline = ({ reqId = null, region = 'global', onBack = null, backLabel = 
   // Candidate profile modal
   const [profileCandidate, setProfileCandidate] = useState(null);
   const [profileModalOpen, setProfileModalOpen] = useState(false);
+  const [profileStage, setProfileStage] = useState(null);
+  const [reparseWithAi, { isLoading: isReparsingWithAi }] = useReparseWithAiMutation();
+
+  const handleReparseWithAi = async () => {
+    try {
+      const updated = await reparseWithAi(profileCandidate.id).unwrap();
+      setProfileCandidate(updated);
+      message.success('Resume parsed with Claude — profile updated');
+    } catch (e) {
+      message.error(e?.data?.error ?? 'Failed to parse resume with Claude');
+    }
+  };
 
   // Poll for completed exam submissions every 30s when there are invited candidates without a score.
   useEffect(() => {
@@ -136,6 +148,20 @@ const Pipeline = ({ reqId = null, region = 'global', onBack = null, backLabel = 
     setPipelineData(nextData);
     if (selectedReqId != null) {
       savePipelineStages({ requirementId: selectedReqId, stages: nextData });
+    }
+  };
+
+  // Rate a candidate (L2/L3 interview rounds only) and persist it.
+  const handleRateCandidate = (stageKey, candidateId, rating) => {
+    const nextData = {
+      ...pipelineData,
+      [stageKey]: pipelineData[stageKey].map((c) =>
+        String(c.id) === String(candidateId) ? { ...c, rating } : c
+      ),
+    };
+    persistStages(nextData);
+    if (profileCandidate?.id === candidateId) {
+      setProfileCandidate((prev) => (prev ? { ...prev, rating } : prev));
     }
   };
 
@@ -211,9 +237,12 @@ const Pipeline = ({ reqId = null, region = 'global', onBack = null, backLabel = 
       return;
     }
 
+    // Moving to a different stage resets any interview rating from the previous round.
+    const { rating, ...movedCandidate } = candidate;
+
     const updated = { ...pipelineData };
     updated[sourceStage] = updated[sourceStage].filter((c) => c.id !== candidate.id);
-    updated[targetStage] = [...updated[targetStage], candidate];
+    updated[targetStage] = [...updated[targetStage], movedCandidate];
     persistStages(updated);
 
     // Dropping onto L1 → prompt to send exam invite
@@ -524,6 +553,15 @@ const Pipeline = ({ reqId = null, region = 'global', onBack = null, backLabel = 
                             />
                           </Tooltip>
                         )}
+                        {(stage.key === 'l2' || stage.key === 'l3') && (
+                          <span onMouseDown={(e) => e.stopPropagation()} draggable={false}>
+                            <Rate
+                              value={candidate.rating ?? 0}
+                              onChange={(val) => handleRateCandidate(stage.key, candidate.id, val)}
+                              style={{ fontSize: 12 }}
+                            />
+                          </span>
+                        )}
                       </Space>
                     </div>
                   ) : (
@@ -543,7 +581,7 @@ const Pipeline = ({ reqId = null, region = 'global', onBack = null, backLabel = 
                           <Button
                             size="small"
                             icon={<UserOutlined />}
-                            onClick={(e) => { e.stopPropagation(); setProfileCandidate(candidate); setProfileModalOpen(true); }}
+                            onClick={(e) => { e.stopPropagation(); setProfileCandidate(candidate); setProfileStage(stage.key); setProfileModalOpen(true); }}
                             style={{ fontSize: 10, height: 22, padding: '0 6px', flexShrink: 0 }}
                           />
                         </Tooltip>
@@ -640,6 +678,17 @@ const Pipeline = ({ reqId = null, region = 'global', onBack = null, backLabel = 
                               Schedule
                             </Button>
                           )}
+                        </div>
+                      )}
+
+                      {/* Interview rating */}
+                      {(stage.key === 'l2' || stage.key === 'l3') && (
+                        <div style={{ marginTop: 6 }} onMouseDown={(e) => e.stopPropagation()}>
+                          <Rate
+                            value={candidate.rating ?? 0}
+                            onChange={(val) => handleRateCandidate(stage.key, candidate.id, val)}
+                            style={{ fontSize: 14 }}
+                          />
                         </div>
                       )}
                     </div>
@@ -743,10 +792,24 @@ const Pipeline = ({ reqId = null, region = 'global', onBack = null, backLabel = 
         title="Candidate Profile"
         open={profileModalOpen}
         onCancel={() => setProfileModalOpen(false)}
-        afterClose={() => setProfileCandidate(null)}
+        afterClose={() => { setProfileCandidate(null); setProfileStage(null); }}
         width={760}
         destroyOnClose
-        footer={<Button key="close" onClick={() => setProfileModalOpen(false)}>Close</Button>}
+        footer={
+          <Space>
+            <Tooltip title={profileCandidate?.aiParsed ? 'Already parsed with Claude' : (!profileCandidate?.resumeS3Key ? 'No resume on file' : '')}>
+              <Button
+                icon={<ThunderboltOutlined />}
+                loading={isReparsingWithAi}
+                disabled={!!profileCandidate?.aiParsed || !profileCandidate?.resumeS3Key}
+                onClick={handleReparseWithAi}
+              >
+                Parse with Claude
+              </Button>
+            </Tooltip>
+            <Button key="close" onClick={() => setProfileModalOpen(false)}>Close</Button>
+          </Space>
+        }
         styles={{ body: { maxHeight: '65vh', overflowY: 'auto' } }}
       >
         {profileCandidate && (
@@ -805,6 +868,14 @@ const Pipeline = ({ reqId = null, region = 'global', onBack = null, backLabel = 
                   {profileCandidate.rankSummary && (
                     <span style={{ fontSize: 12, color: '#6b7280', marginLeft: 8 }}>{profileCandidate.rankSummary}</span>
                   )}
+                </Descriptions.Item>
+              )}
+              {(profileStage === 'l2' || profileStage === 'l3') && (
+                <Descriptions.Item label="Interview Rating" span={2}>
+                  <Rate
+                    value={profileCandidate.rating ?? 0}
+                    onChange={(val) => handleRateCandidate(profileStage, profileCandidate.id, val)}
+                  />
                 </Descriptions.Item>
               )}
             </Descriptions>

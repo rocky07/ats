@@ -45,8 +45,15 @@ export const requirementsApi = createApi({
       }),
       invalidatesTags: ['Requirement'], // Invalidate the 'Requirement' tag to refetch the list after deletion
     }),
+    shareRequirement: builder.mutation({
+      query: ({ requirementId, ...body }) => ({
+        url: `/requirements/${requirementId}/share`,
+        method: 'POST',
+        body,
+      }),
+    }),
 
   }),
 });
 
-export const { useGetRequirementsQuery, useGetRequirementDetailsQuery, useAddRequirementMutation, useUpdateRequirementMutation, useDeleteRequirementMutation, useGetDepartmentsQuery } = requirementsApi;
+export const { useGetRequirementsQuery, useGetRequirementDetailsQuery, useAddRequirementMutation, useUpdateRequirementMutation, useDeleteRequirementMutation, useShareRequirementMutation, useGetDepartmentsQuery } = requirementsApi;

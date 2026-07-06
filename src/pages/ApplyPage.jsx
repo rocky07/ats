@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import {
-  Card, Typography, Form, Input, Button, Upload, Alert, Spin, Result, Tag, Space,
+  Card, Typography, Form, Input, Button, Upload, Alert, Spin, Result, Tag, Space, InputNumber,
 } from 'antd';
 import { UploadOutlined, LinkedinOutlined, SendOutlined } from '@ant-design/icons';
 import ReCAPTCHA from 'react-google-recaptcha';
@@ -47,6 +47,12 @@ const ApplyPage = () => {
       if (values.email) fd.append('email', values.email);
       if (values.resume?.file) fd.append('resume', values.resume.file);
       if (captchaToken) fd.append('g-recaptcha-response', captchaToken);
+
+      const skillExperience = {};
+      (job.mustHaves ?? []).forEach((skill) => {
+        skillExperience[skill] = Number(values.skillExperience?.[skill] ?? 0);
+      });
+      fd.append('skillExperience', JSON.stringify(skillExperience));
 
       const res = await fetch(`${API_BASE_URL}/public/jobs/${reqId}/apply`, {
         method: 'POST',
@@ -145,6 +151,25 @@ const ApplyPage = () => {
               <Button icon={<UploadOutlined />} size="large">Choose File</Button>
             </Upload>
           </Form.Item>
+
+          {(job.mustHaves ?? []).length > 0 && (
+            <Card size="small" type="inner" title="Must-Have Skills" style={{ marginBottom: 20 }}>
+              <Paragraph type="secondary" style={{ fontSize: 12, marginBottom: 12 }}>
+                Enter your years of experience for each required skill below.
+              </Paragraph>
+              {job.mustHaves.map((skill) => (
+                <Form.Item
+                  key={skill}
+                  name={['skillExperience', skill]}
+                  label={skill}
+                  initialValue={0}
+                  style={{ marginBottom: 12 }}
+                >
+                  <InputNumber min={0} max={50} style={{ width: '100%' }} addonAfter="years" />
+                </Form.Item>
+              ))}
+            </Card>
+          )}
 
           {/* CAPTCHA — only rendered when site key is configured */}
           {SITE_KEY ? (

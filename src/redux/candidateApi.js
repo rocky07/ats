@@ -59,7 +59,15 @@ export const candidateApi = createApi({
       },
       invalidatesTags: ['Candidates'],
     }),
+    // Re-parse an already-uploaded resume with Claude to fill in summary/experience/etc.
+    reparseWithAi: builder.mutation({
+      query: (candidateId) => ({
+        url: `/candidates/${candidateId}/reparse`,
+        method: 'POST',
+      }),
+      invalidatesTags: ['Candidates'],
+    }),
   }),
 });
 
-export const { useGetAllCandidatesQuery, useGetCandidatesDetailsQuery, useAddCandidateMutation, useEditCandidateMutation, useDeleteCandidateMutation, useUploadResumeMutation, useGetResumeUrlQuery } = candidateApi;
+export const { useGetAllCandidatesQuery, useGetCandidatesDetailsQuery, useAddCandidateMutation, useEditCandidateMutation, useDeleteCandidateMutation, useUploadResumeMutation, useGetResumeUrlQuery, useReparseWithAiMutation } = candidateApi;
