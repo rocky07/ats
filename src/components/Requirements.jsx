@@ -7,7 +7,7 @@ import { useUploadResumeMutation,useGetAllCandidatesQuery } from '../redux/candi
 import { useLazyGetPipelineStagesQuery, useSavePipelineStagesMutation } from '../redux/pipelineStagesApi';
 import { useGetMarketIntelligenceMutation, useGenerateJobSummaryMutation, useRankCandidatesMutation } from '../redux/intelligenceApi';
 import { useGetExamByRequirementQuery, useGenerateExamMutation, useSendExamInviteMutation, useLazyGetSubmissionQuery } from '../redux/examApi';
-import { useGetUserSettingsQuery } from '../redux/settingsApi';
+import { useGetUserSettingsQuery, useGetExamSettingsQuery } from '../redux/settingsApi';
 import ScheduleInterviewDrawer from './ScheduleInterviewDrawer';
 
 // The fixed pipeline stages, in order.
@@ -57,6 +57,7 @@ import {
   Checkbox,
   Radio,
   Rate,
+  Switch,
 } from 'antd';
 import {
   FireOutlined,
@@ -81,6 +82,9 @@ import {
   ShareAltOutlined,
   LinkedinOutlined,
   MailOutlined,
+  SettingOutlined,
+  IdcardOutlined,
+  NodeIndexOutlined,
 } from '@ant-design/icons';
 import { SearchOutlined, PlusOutlined } from '@ant-design/icons';
 
@@ -218,6 +222,48 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
   };
 
   const getApplyUrl = (req) => `${window.location.origin}/apply/${req?.id}`;
+
+  // --- Per-job Exam Configuration modal state ---
+  const { data: examDefaults } = useGetExamSettingsQuery();
+  const [examConfigReq, setExamConfigReq] = useState(null);
+  const [examConfigOverride, setExamConfigOverride] = useState(false);
+  const [examConfigRequireId, setExamConfigRequireId] = useState(true);
+  const [examConfigQuestionCount, setExamConfigQuestionCount] = useState(20);
+  const [examConfigTimeLimit, setExamConfigTimeLimit] = useState(15);
+  const [isSavingExamConfig, setIsSavingExamConfig] = useState(false);
+
+  const openExamConfigModal = (req) => {
+    setExamConfigReq(req);
+    const cfg = req?.examConfig;
+    setExamConfigOverride(!!cfg);
+    setExamConfigRequireId(cfg?.requireIdVerification ?? examDefaults?.requireIdVerification ?? true);
+    setExamConfigQuestionCount(cfg?.questionCount ?? examDefaults?.questionCount ?? 20);
+    setExamConfigTimeLimit(cfg?.timeLimitMinutes ?? examDefaults?.timeLimitMinutes ?? 15);
+  };
+
+  const handleSaveExamConfig = async () => {
+    setIsSavingExamConfig(true);
+    try {
+      await updateRequirement({
+        requirementId: examConfigReq.id,
+        updatedRequirement: {
+          examConfig: examConfigOverride
+            ? {
+                requireIdVerification: examConfigRequireId,
+                questionCount: examConfigQuestionCount,
+                timeLimitMinutes: examConfigTimeLimit,
+              }
+            : null,
+        },
+      }).unwrap();
+      message.success('Exam configuration saved');
+      setExamConfigReq(null);
+    } catch (err) {
+      message.error(err?.data?.error ?? 'Failed to save exam configuration');
+    } finally {
+      setIsSavingExamConfig(false);
+    }
+  };
 
   // Adds every vendor belonging to the selected groups to the recipient list (capped, deduped).
   const handleShareGroupsChange = (groups) => {
@@ -658,14 +704,16 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
                 View Details
               </Button>
               <Row gutter={8}>
-                <Col xs={12}>
+                <Col xs={6}>
+                <Tooltip title="View pipeline">
                   <Button
                     block
+                    icon={<NodeIndexOutlined />}
                     onClick={() => onViewPipeline?.(req.id)}
                     style={{ borderColor: '#000', color: '#000', border: '1px solid #000', height: 40, background: 'transparent' }}
                   >
-                    View Pipeline
                   </Button>
+                  </Tooltip>
                 </Col>
                 <Col xs={6}>
                   <Button
@@ -680,6 +728,15 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
                     <Button
                       icon={<ShareAltOutlined />}
                       onClick={() => openShareModal(req)}
+                      style={{ borderColor: '#000', color: '#000', border: '1px solid #000', width: '100%', height: 40, background: 'transparent' }}
+                    />
+                  </Tooltip>
+                </Col>
+                <Col xs={6}>
+                  <Tooltip title="Exam settings">
+                    <Button
+                      icon={<SettingOutlined />}
+                      onClick={() => openExamConfigModal(req)}
                       style={{ borderColor: '#000', color: '#000', border: '1px solid #000', width: '100%', height: 40, background: 'transparent' }}
                     />
                   </Tooltip>
@@ -717,7 +774,7 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
                   <Button size="small" type="primary" icon={<EyeOutlined />} onClick={() => handleView(req)} style={{ backgroundColor: '#2563eb' }}>
                     View Details
                   </Button>
-                  <Button size="small" onClick={() => onViewPipeline?.(req.id)}>
+                  <Button size="small" icon={<NodeIndexOutlined />} onClick={() => onViewPipeline?.(req.id)}>
                     View Pipeline
                   </Button>
                   <Button size="small" onClick={() => showModal(req)}>
@@ -725,6 +782,9 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
                   </Button>
                   <Button size="small" icon={<ShareAltOutlined />} onClick={() => openShareModal(req)}>
                     Share
+                  </Button>
+                  <Button size="small" icon={<SettingOutlined />} onClick={() => openExamConfigModal(req)}>
+                    Exam
                   </Button>
                 </Space>
               ),
@@ -743,6 +803,9 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
             <Button onClick={() => setViewReq(null)}>Close</Button>
             <Button icon={<ShareAltOutlined />} onClick={() => openShareModal(viewReq)}>
               Share
+            </Button>
+            <Button icon={<SettingOutlined />} onClick={() => openExamConfigModal(viewReq)}>
+              Exam Settings
             </Button>
             <Button
               type="primary"
@@ -1606,6 +1669,55 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
             )}
           </div>
         )}
+      </Modal>
+
+      {/* --- Exam Configuration Modal (per job requirement) --- */}
+      <Modal
+        title={<Space><SettingOutlined />Exam Configuration{examConfigReq ? ` — ${examConfigReq.title}` : ''}</Space>}
+        open={!!examConfigReq}
+        onCancel={() => setExamConfigReq(null)}
+        onOk={handleSaveExamConfig}
+        confirmLoading={isSavingExamConfig}
+        okText="Save"
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0 16px' }}>
+          <div>
+            <Text strong>Override default exam settings for this job</Text>
+            <br />
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              When off, this job uses the org-wide default configured by an admin in Settings → Exams.
+            </Text>
+          </div>
+          <Switch checked={examConfigOverride} onChange={setExamConfigOverride} />
+        </div>
+
+        <div style={{ opacity: examConfigOverride ? 1 : 0.5, pointerEvents: examConfigOverride ? 'auto' : 'none' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderTop: '1px solid #f0f0f0' }}>
+            <div>
+              <Text strong><IdcardOutlined /> Photo ID Verification</Text>
+              <br />
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                Require a live selfie + government ID match before the exam timer starts
+              </Text>
+            </div>
+            <Switch checked={examConfigRequireId} onChange={setExamConfigRequireId} />
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginTop: 16 }}>
+            <div>
+              <Text style={{ display: 'block', marginBottom: 4 }}>Number of Questions</Text>
+              <InputNumber min={5} max={100} value={examConfigQuestionCount} onChange={setExamConfigQuestionCount} style={{ width: '100%' }} />
+            </div>
+            <div>
+              <Text style={{ display: 'block', marginBottom: 4 }}>Time to Complete (minutes)</Text>
+              <InputNumber min={1} max={180} value={examConfigTimeLimit} onChange={setExamConfigTimeLimit} style={{ width: '100%' }} />
+            </div>
+          </div>
+          <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 12 }}>
+            Question count applies the next time an exam is generated for this job; existing exams keep their
+            original question set. ID verification and time limit apply immediately.
+          </Text>
+        </div>
       </Modal>
     </>
   );

@@ -30,6 +30,8 @@ import {
   UserOutlined,
   BellOutlined,
   LinkedinOutlined,
+  FileTextOutlined,
+  IdcardOutlined,
 } from '@ant-design/icons';
 import { useAuth, getStoredToken } from '../auth/AuthContext';
 import { REGION_OPTIONS } from '../constants/regions';
@@ -38,6 +40,8 @@ import {
   useUpdateSystemSettingsMutation,
   useGetUserSettingsQuery,
   useUpdateUserSettingsMutation,
+  useGetExamSettingsQuery,
+  useUpdateExamSettingsMutation,
 } from '../redux/settingsApi';
 
 const { Title, Text, Paragraph } = Typography;
@@ -522,6 +526,92 @@ const AISettingsTab = () => {
   );
 };
 
+// ─── Exams Tab ────────────────────────────────────────────────────────────────
+const ExamSettingsTab = () => {
+  const { data: examData, isLoading } = useGetExamSettingsQuery();
+  const [updateExam, { isLoading: saving }] = useUpdateExamSettingsMutation();
+  const [form] = Form.useForm();
+
+  useEffect(() => {
+    if (examData) form.setFieldsValue({
+      requireIdVerification: examData.requireIdVerification ?? true,
+      questionCount: examData.questionCount ?? 20,
+      timeLimitMinutes: examData.timeLimitMinutes ?? 15,
+    });
+  }, [examData]);
+
+  const onSave = async () => {
+    const v = form.getFieldsValue();
+    try {
+      await updateExam({
+        requireIdVerification: v.requireIdVerification,
+        questionCount: v.questionCount,
+        timeLimitMinutes: v.timeLimitMinutes,
+      }).unwrap();
+      message.success('Exam settings saved');
+    } catch (err) {
+      message.error(err?.data?.error ?? 'Failed to save exam settings');
+    }
+  };
+
+  if (isLoading) return <Spin tip="Loading exam settings…" />;
+
+  return (
+    <div style={{ maxWidth: 680 }}>
+      <div style={{ marginBottom: 20 }}>
+        <Title level={5} style={{ margin: 0 }}>Exam Settings</Title>
+        <Text type="secondary">
+          Org-wide default for the L1 online assessment. Individual job requirements can override
+          these via the gear icon on each job's exam settings.
+        </Text>
+      </div>
+      <Form form={form} layout="vertical">
+        <Card style={{ borderRadius: 10, marginBottom: 16 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 0', borderBottom: '1px solid #f0f0f0' }}>
+            <div>
+              <Text strong><IdcardOutlined /> Photo ID Verification</Text>
+              <br />
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                Require a live selfie + government ID match before the exam timer starts
+              </Text>
+            </div>
+            <Form.Item name="requireIdVerification" valuePropName="checked" noStyle>
+              <Switch />
+            </Form.Item>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginTop: 16 }}>
+            <Form.Item
+              name="questionCount"
+              label="Number of Questions"
+              extra={<Text type="secondary" style={{ fontSize: 12 }}>Default: 20</Text>}
+              style={{ marginBottom: 0 }}
+            >
+              <InputNumber min={5} max={100} style={{ width: '100%' }} placeholder="20" />
+            </Form.Item>
+            <Form.Item
+              name="timeLimitMinutes"
+              label="Time to Complete (minutes)"
+              extra={<Text type="secondary" style={{ fontSize: 12 }}>Default: 15</Text>}
+              style={{ marginBottom: 0 }}
+            >
+              <InputNumber min={1} max={180} style={{ width: '100%' }} placeholder="15" />
+            </Form.Item>
+          </div>
+          <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 8 }}>
+            Question count applies to newly generated exams; existing exams keep their original question set.
+            Time limit and ID verification apply immediately to all exams, including ones already generated.
+          </Text>
+        </Card>
+
+        <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={onSave} style={{ backgroundColor: '#2563eb' }}>
+          Save Exam Settings
+        </Button>
+      </Form>
+    </div>
+  );
+};
+
 // ─── System Settings Tab (admin only) ────────────────────────────────────────
 const SystemSettingsTab = () => {
   const { data: sysData, isLoading } = useGetSystemSettingsQuery();
@@ -726,6 +816,13 @@ const Settings = ({ onSettingsChange }) => {
       label: <Space><RobotOutlined />AI / LLM</Space>,
       children: <AISettingsTab />,
     },
+
+    // Exams — default config; admin only (per-job overrides live on each requirement)
+    ...(isAdmin ? [{
+      key: 'exams',
+      label: <Space><FileTextOutlined /><span>Exams</span><Tag color="red" style={{ fontSize: 10, marginLeft: 0 }}>Admin</Tag></Space>,
+      children: <ExamSettingsTab />,
+    }] : []),
 
     // System Settings (admin only)
     ...(isAdmin ? [{

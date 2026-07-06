@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
-import { useGetExamPublicQuery, useSubmitExamMutation } from '../redux/examApi';
-import { Button, Card, Radio, Progress, Typography, Space, Result, Spin, Tag } from 'antd';
-import { ClockCircleOutlined, CheckCircleOutlined, TrophyOutlined } from '@ant-design/icons';
+import { useGetExamPublicQuery, useSubmitExamMutation, useVerifyIdentityMutation } from '../redux/examApi';
+import { Button, Card, Radio, Progress, Typography, Space, Result, Spin, Tag, Upload, Alert } from 'antd';
+import { ClockCircleOutlined, CheckCircleOutlined, TrophyOutlined, CameraOutlined, IdcardOutlined, ReloadOutlined } from '@ant-design/icons';
 
 const { Title, Text } = Typography;
 
-const TOTAL_SECONDS = 15 * 60; // 15 minutes
+const DEFAULT_TIME_LIMIT_MINUTES = 15;
 
 const ExamPage = () => {
   const { examId } = useParams();
@@ -16,14 +16,126 @@ const ExamPage = () => {
 
   const { data: exam, isLoading, error } = useGetExamPublicQuery(examId);
   const [submitExam, { isLoading: isSubmitting }] = useSubmitExamMutation();
+  const [verifyIdentity, { isLoading: isVerifying }] = useVerifyIdentityMutation();
+
+  const timeLimitMinutes = exam?.timeLimitMinutes ?? DEFAULT_TIME_LIMIT_MINUTES;
+  const requireIdVerification = exam?.requireIdVerification ?? true;
 
   const [answers, setAnswers] = useState({});
-  const [secondsLeft, setSecondsLeft] = useState(TOTAL_SECONDS);
+  const [secondsLeft, setSecondsLeft] = useState(DEFAULT_TIME_LIMIT_MINUTES * 60);
   const [started, setStarted] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [result, setResult] = useState(null);
   const startTimeRef = useRef(null);
   const timerRef = useRef(null);
+
+  // Reset the countdown once the exam's configured time limit is known.
+  useEffect(() => {
+    if (exam && !started) setSecondsLeft(timeLimitMinutes * 60);
+  }, [exam, timeLimitMinutes]);
+
+  // Identity verification (selfie vs ID document) gate before the exam timer starts.
+  // Skipped entirely when the admin has disabled it in Settings → Exams.
+  const [verifyStep, setVerifyStep] = useState('intro'); // intro | camera | review | verified
+  const [cameraError, setCameraError] = useState(null);
+  const [selfieImage, setSelfieImage] = useState(null); // base64 data URL
+  const [idImage, setIdImage] = useState(null); // base64 data URL
+  const [verifyError, setVerifyError] = useState(null);
+  const videoRef = useRef(null);
+  const streamRef = useRef(null);
+
+  const stopCamera = () => {
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+  };
+
+  const openCamera = async () => {
+    setCameraError(null);
+    setVerifyStep('camera');
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+      streamRef.current = stream;
+      if (videoRef.current) videoRef.current.srcObject = stream;
+    } catch (err) {
+      setCameraError('Could not access your camera. Please allow camera permissions and try again.');
+    }
+  };
+
+  const captureSelfie = () => {
+    const video = videoRef.current;
+    if (!video) return;
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext('2d').drawImage(video, 0, 0);
+    setSelfieImage(canvas.toDataURL('image/jpeg'));
+    stopCamera();
+    setVerifyStep('review');
+  };
+
+  // Phone camera photos can be 5-10+ MB / huge dimensions, well past Rekognition's
+  // 5MB image-bytes limit and Textract's 4096px page dimension limit. Downscale
+  // to a max 1600px edge before sending.
+  const downscaleImage = (dataUrl, maxEdge = 1600, quality = 0.85) =>
+    new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        const scale = Math.min(1, maxEdge / Math.max(img.width, img.height));
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width * scale;
+        canvas.height = img.height * scale;
+        canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.src = dataUrl;
+    });
+
+  const handleIdUpload = (file) => {
+    const reader = new FileReader();
+    reader.onload = async () => setIdImage(await downscaleImage(reader.result));
+    reader.readAsDataURL(file);
+    return false; // prevent antd Upload's default auto-upload
+  };
+
+  const retryVerification = () => {
+    setSelfieImage(null);
+    setIdImage(null);
+    setVerifyError(null);
+    setVerifyStep('intro');
+  };
+
+  const handleVerify = async () => {
+    setVerifyError(null);
+    try {
+      const res = await verifyIdentity({
+        examId,
+        selfieImageBase64: selfieImage,
+        idImageBase64: idImage,
+        candidateName,
+      }).unwrap();
+      if (res.verified) {
+        setVerifyStep('verified');
+      } else {
+        const reason = !res.faceMatch
+          ? "Your selfie doesn't match the photo on the ID document."
+          : `The name on the ID ("${res.extractedName}") doesn't match "${candidateName}".`;
+        setVerifyError(reason);
+      }
+    } catch (err) {
+      const reason =
+        err?.data?.error ??
+        (err?.status === 413 ? 'Image file is too large. Please try a smaller photo.' : null) ??
+        (err?.status === 'FETCH_ERROR' ? 'Could not reach the server. Please check your connection.' : null) ??
+        `Verification failed${err?.status ? ` (${err.status})` : ''}. Please try again.`;
+      setVerifyError(reason);
+    }
+  };
+
+  useEffect(() => () => stopCamera(), []);
+
+  useEffect(() => {
+    if (exam && !requireIdVerification) setVerifyStep('verified');
+  }, [exam, requireIdVerification]);
 
   // Countdown
   useEffect(() => {
@@ -132,6 +244,100 @@ const ExamPage = () => {
     );
   }
 
+  // ── Identity verification screen ──
+  if (!started && verifyStep !== 'verified') {
+    return (
+      <div style={{ minHeight: '100vh', background: '#f0f4ff', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+        <Card style={{ maxWidth: 520, width: '100%', textAlign: 'center', borderRadius: 12 }}>
+          <div style={{ fontSize: 48, marginBottom: 16 }}>🪪</div>
+          <Title level={2} style={{ margin: '0 0 8px' }}>Identity Verification</Title>
+          <Text type="secondary">Hi {candidateName}, please verify your identity before starting your {exam.title}.</Text>
+
+          {verifyStep === 'intro' && (
+            <div style={{ marginTop: 24 }}>
+              <div style={{ textAlign: 'left', marginBottom: 20 }}>
+                {[
+                  ['Take a live selfie using your camera', '🤳'],
+                  ['Upload a photo of your government ID', '🪪'],
+                  ["We'll match your face and name automatically", '✅'],
+                  ['The exam timer starts only after verification', '⏱️'],
+                ].map(([text, icon]) => (
+                  <div key={text} style={{ padding: '8px 0', fontSize: 14 }}>{icon} {text}</div>
+                ))}
+              </div>
+              <Button type="primary" size="large" block icon={<CameraOutlined />} onClick={openCamera} style={{ backgroundColor: '#2563eb', height: 48, fontSize: 16 }}>
+                Start Verification
+              </Button>
+            </div>
+          )}
+
+          {verifyStep === 'camera' && (
+            <div style={{ marginTop: 24 }}>
+              {cameraError ? (
+                <Alert type="error" showIcon message={cameraError} style={{ marginBottom: 16, textAlign: 'left' }} />
+              ) : (
+                <video ref={videoRef} autoPlay playsInline style={{ width: '100%', borderRadius: 8, background: '#000', marginBottom: 16 }} />
+              )}
+              <Space direction="vertical" style={{ width: '100%' }}>
+                {!cameraError && (
+                  <Button type="primary" size="large" block icon={<CameraOutlined />} onClick={captureSelfie} style={{ backgroundColor: '#2563eb', height: 44 }}>
+                    Capture Selfie
+                  </Button>
+                )}
+                <Button block onClick={retryVerification}>Cancel</Button>
+              </Space>
+            </div>
+          )}
+
+          {verifyStep === 'review' && (
+            <div style={{ marginTop: 24, textAlign: 'left' }}>
+              <div style={{ display: 'flex', gap: 16, marginBottom: 16, justifyContent: 'center' }}>
+                <div>
+                  <Text type="secondary" style={{ fontSize: 12 }}>Selfie</Text>
+                  <img src={selfieImage} alt="Selfie" style={{ width: 140, height: 140, objectFit: 'cover', borderRadius: 8, display: 'block' }} />
+                </div>
+                {idImage && (
+                  <div>
+                    <Text type="secondary" style={{ fontSize: 12 }}>ID Document</Text>
+                    <img src={idImage} alt="ID document" style={{ width: 140, height: 140, objectFit: 'cover', borderRadius: 8, display: 'block' }} />
+                  </div>
+                )}
+              </div>
+
+              {!idImage ? (
+                <Upload.Dragger accept="image/*" showUploadList={false} beforeUpload={handleIdUpload} style={{ marginBottom: 16 }}>
+                  <p style={{ fontSize: 24, margin: 0 }}><IdcardOutlined /></p>
+                  <p style={{ margin: 0 }}>Click or drag a photo of your government ID</p>
+                </Upload.Dragger>
+              ) : (
+                <Button icon={<ReloadOutlined />} onClick={() => setIdImage(null)} style={{ marginBottom: 16 }}>
+                  Retake ID Photo
+                </Button>
+              )}
+
+              {verifyError && <Alert type="error" showIcon message={verifyError} style={{ marginBottom: 16 }} />}
+
+              <Space direction="vertical" style={{ width: '100%' }}>
+                <Button
+                  type="primary"
+                  size="large"
+                  block
+                  loading={isVerifying}
+                  disabled={!selfieImage || !idImage}
+                  onClick={handleVerify}
+                  style={{ backgroundColor: '#2563eb', height: 44 }}
+                >
+                  Verify Identity
+                </Button>
+                <Button block onClick={retryVerification}>Start Over</Button>
+              </Space>
+            </div>
+          )}
+        </Card>
+      </div>
+    );
+  }
+
   // ── Start screen ──
   if (!started) {
     return (
@@ -140,10 +346,13 @@ const ExamPage = () => {
           <div style={{ fontSize: 48, marginBottom: 16 }}>📋</div>
           <Title level={2} style={{ margin: '0 0 8px' }}>{exam.title}</Title>
           <Text type="secondary">Hi {candidateName}, welcome to your L1 assessment.</Text>
+          {requireIdVerification && (
+            <Alert type="success" showIcon message="Identity verified" style={{ margin: '16px 0', textAlign: 'left' }} />
+          )}
           <div style={{ margin: '24px 0', textAlign: 'left' }}>
             {[
               [`${totalQ} multiple-choice questions`, '📝'],
-              ['15 minutes to complete', '⏱️'],
+              [`${timeLimitMinutes} minutes to complete`, '⏱️'],
               ['Timer starts when you click Start', '🚀'],
               ['Each question has one correct answer', '✅'],
             ].map(([text, icon]) => (

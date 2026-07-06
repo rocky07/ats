@@ -22,6 +22,13 @@ export const examApi = createApi({
     getExamPublic: builder.query({
       query: (examId) => `/exams/${examId}`,
     }),
+    verifyIdentity: builder.mutation({
+      query: ({ examId, ...body }) => ({
+        url: `/exams/${examId}/verify-identity`,
+        method: 'POST',
+        body,
+      }),
+    }),
     submitExam: builder.mutation({
       query: ({ examId, ...body }) => ({
         url: `/exams/${examId}/submit`,
@@ -46,6 +53,7 @@ export const {
   useGenerateExamMutation,
   useGetExamByRequirementQuery,
   useGetExamPublicQuery,
+  useVerifyIdentityMutation,
   useSubmitExamMutation,
   useGetSubmissionQuery,
   useLazyGetSubmissionQuery,
