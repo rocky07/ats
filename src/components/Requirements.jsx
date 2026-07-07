@@ -827,9 +827,6 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
             <Button icon={<ShareAltOutlined />} onClick={() => openShareModal(viewReq)}>
               Share
             </Button>
-            <Button icon={<SettingOutlined />} onClick={() => openExamConfigModal(viewReq)}>
-              Exam Settings
-            </Button>
             <Button
               type="primary"
               icon={<ArrowRightOutlined />}
