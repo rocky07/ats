@@ -31,7 +31,15 @@ export const intelligenceApi = createApi({
         body: { candidates, requirement },
       }),
     }),
+    // Parse pasted free-text requirement into structured form fields.
+    parseRequirement: builder.mutation({
+      query: (text) => ({
+        url: '/intelligence/parse-requirement',
+        method: 'POST',
+        body: { text },
+      }),
+    }),
   }),
 });
 
-export const { useGetMarketIntelligenceMutation, useGenerateJobSummaryMutation, useRankCandidatesMutation } = intelligenceApi;
+export const { useGetMarketIntelligenceMutation, useGenerateJobSummaryMutation, useRankCandidatesMutation, useParseRequirementMutation } = intelligenceApi;

@@ -5,6 +5,7 @@ import {
 } from 'antd';
 import { UploadOutlined, LinkedinOutlined, SendOutlined } from '@ant-design/icons';
 import ReCAPTCHA from 'react-google-recaptcha';
+import 'react-quill-new/dist/quill.snow.css';
 import { API_BASE_URL } from '../config';
 
 const { Title, Text, Paragraph } = Typography;
@@ -114,7 +115,11 @@ const ApplyPage = () => {
         <Title level={4} style={{ marginBottom: 4 }}>{job.title}</Title>
         {job.department && <Tag color="blue" style={{ marginBottom: 12 }}>{job.department}</Tag>}
         {job.description && (
-          <Paragraph type="secondary" style={{ marginBottom: 0 }}>{job.description}</Paragraph>
+          <div
+            className="ql-editor"
+            style={{ padding: 0, marginBottom: 0, color: 'rgba(0,0,0,0.45)' }}
+            dangerouslySetInnerHTML={{ __html: job.description }}
+          />
         )}
       </Card>
 

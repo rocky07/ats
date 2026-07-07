@@ -463,7 +463,7 @@ const AISettingsTab = () => {
   const TOGGLES = [
     { key: 'enableAIResumeParsing', label: 'AI Resume Parsing', desc: 'Use Claude AI to extract name, email, phone and skills from resumes. Falls back to rule-based parsing when off.' },
     { key: 'enableResumeScreening', label: 'AI Resume Screening', desc: 'Auto-score resumes against JD' },
-    { key: 'enableJdGeneration', label: 'JD Generation', desc: 'Generate job descriptions with AI' },
+    { key: 'enableJdGeneration', label: 'Parse with AI', desc: 'Auto-fill requirement fields (including the JD) by parsing pasted text with AI' },
     { key: 'enableCandidateSummary', label: 'Candidate Summary', desc: 'Auto-summarise candidate profiles' },
     { key: 'enableExamGeneration', label: 'Generate Exam', desc: 'Auto-Generate L1 Exam' },
     { key: 'enableMarketIntelligence', label: 'Live Dice Market Intelligence', desc: 'Auto-fetch live market data (supply, salary, velocity) while creating a requirement' },

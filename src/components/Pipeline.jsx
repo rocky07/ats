@@ -501,7 +501,9 @@ const Pipeline = ({ reqId = null, region = 'global', onBack = null, backLabel = 
               </div>
             </Title>
             <div style={{ display: 'flex', flexDirection: 'column', gap: compact ? 6 : 12 }}>
-              {pipelineData[stage.key]?.map((candidate) => (
+              {[...(pipelineData[stage.key] ?? [])]
+                .sort((a, b) => (b.score ?? -1) - (a.score ?? -1) || (b.rating ?? 0) - (a.rating ?? 0))
+                .map((candidate) => (
                 <Card
                   key={candidate.id}
                   style={{
@@ -520,6 +522,14 @@ const Pipeline = ({ reqId = null, region = 'global', onBack = null, backLabel = 
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, fontSize: 12 }}>
                       <Text strong ellipsis style={{ flex: 1 }}>{candidate.name}</Text>
                       <Space size={4}>
+                        <Tooltip title="View candidate profile">
+                          <Button
+                            size="small"
+                            icon={<UserOutlined />}
+                            onClick={(e) => { e.stopPropagation(); setProfileCandidate(candidate); setProfileStage(stage.key); setProfileModalOpen(true); }}
+                            style={{ fontSize: 10, height: 20, padding: '0 4px' }}
+                          />
+                        </Tooltip>
                         {candidate.score != null && (
                           <Tooltip title={candidate.rankSummary}>
                             <Tag color="blue" style={{ fontSize: 10, cursor: 'help', margin: 0 }}>{candidate.score}/100</Tag>
@@ -553,14 +563,8 @@ const Pipeline = ({ reqId = null, region = 'global', onBack = null, backLabel = 
                             />
                           </Tooltip>
                         )}
-                        {(stage.key === 'l2' || stage.key === 'l3') && (
-                          <span onMouseDown={(e) => e.stopPropagation()} draggable={false}>
-                            <Rate
-                              value={candidate.rating ?? 0}
-                              onChange={(val) => handleRateCandidate(stage.key, candidate.id, val)}
-                              style={{ fontSize: 12 }}
-                            />
-                          </span>
+                        {(stage.key === 'l2' || stage.key === 'l3') && candidate.rating > 0 && (
+                          <Tag color="gold" style={{ fontSize: 10, margin: 0 }}>★ {candidate.rating}</Tag>
                         )}
                       </Space>
                     </div>

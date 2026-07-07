@@ -5,12 +5,17 @@ import { useGetRequirementsQuery, useAddRequirementMutation, useUpdateRequiremen
 import { useGetVendorsQuery, useGetGroupsQuery } from '../redux/vendorApi';
 import { useUploadResumeMutation,useGetAllCandidatesQuery } from '../redux/candidateApi';
 import { useLazyGetPipelineStagesQuery, useSavePipelineStagesMutation } from '../redux/pipelineStagesApi';
-import { useGetMarketIntelligenceMutation, useGenerateJobSummaryMutation, useRankCandidatesMutation } from '../redux/intelligenceApi';
+import { useGetMarketIntelligenceMutation, useRankCandidatesMutation, useParseRequirementMutation } from '../redux/intelligenceApi';
 import { useGetExamByRequirementQuery, useGenerateExamMutation, useSendExamInviteMutation, useLazyGetSubmissionQuery } from '../redux/examApi';
 import { useGetUserSettingsQuery, useGetExamSettingsQuery } from '../redux/settingsApi';
 import ScheduleInterviewDrawer from './ScheduleInterviewDrawer';
+import CandidateProfileModal from './CandidateProfileModal';
+import ReactQuill from 'react-quill-new';
+import 'react-quill-new/dist/quill.snow.css';
 
 // The fixed pipeline stages, in order.
+const stripHtml = (html = '') => html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+
 const STAGE_KEYS = ['ingested', 'ranked', 'l1', 'l2', 'l3'];
 
 // Flatten the backend stages object into a flat applicant list (with a stage field).
@@ -119,7 +124,7 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
   const [savePipelineStages] = useSavePipelineStagesMutation();
   // Dice market intelligence + AI job-summary generation
   const [fetchMarketIntelligence, { isLoading: isMarketLoading }] = useGetMarketIntelligenceMutation();
-  const [generateJobSummary] = useGenerateJobSummaryMutation();
+  const [parseRequirement] = useParseRequirementMutation();
   // Ranking + exam hooks (used inside View Details)
   const [rankCandidatesApi, { isLoading: isRanking }] = useRankCandidatesMutation();
   const [generateExamApi, { isLoading: isGeneratingExam }] = useGenerateExamMutation();
@@ -142,7 +147,7 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
     gaps: { matchPct: 0, trending: [] }
   });
 
-  const [isGenerating, setIsGenerating] = useState(false);
+  const [isParsingRequirement, setIsParsingRequirement] = useState(false);
 
   // Auto-fetch market intelligence when all required fields are filled
   useEffect(() => {
@@ -323,6 +328,7 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
 
   // --- View Details modal: applicants & pipeline state ---
   const [viewReq, setViewReq] = useState(null);
+  const [profileCandidate, setProfileCandidate] = useState(null);
   const { data: currentExam } = useGetExamByRequirementQuery(viewReq?.id, { skip: !viewReq?.id });
   const [applicantsByReq, setApplicantsByReq] = useState({});
   const [addPick, setAddPick] = useState(null);
@@ -540,35 +546,33 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
     return false; // prevent antd from actually uploading
   };
 
-  // AI-generate the job description from the collected form fields (via Claude on the backend).
-  const handleAIFill = async () => {
+  // Parse a pasted job requirement blob into structured form fields (via Claude on the backend).
+  const handleParseRequirement = async () => {
     if (!isJdGenerationEnabled) {
-      message.warning('AI JD Generation is disabled in Settings.');
+      message.warning('Parse with AI is disabled in Settings.');
       return;
     }
-    const values = form.getFieldsValue([
-      'title', 'department', 'location', 'workMode', 'jobType',
-      'salaryMin', 'salaryMax', 'hourlyRateMin', 'hourlyRateMax', 'mustHaves', 'niceToHaves',
-    ]);
-    if (!values.title) {
-      message.warning('Please enter a Requirement Title first so the AI has context!');
+    const descriptionHtml = form.getFieldValue('description');
+    const descriptionText = stripHtml(descriptionHtml);
+    if (!descriptionText.trim()) {
+      message.warning('Enter a job description first.');
       return;
     }
-
-    setIsGenerating(true);
+    setIsParsingRequirement(true);
     try {
-      const { summary } = await generateJobSummary(values).unwrap();
-      form.setFieldsValue({ description: summary });
-      message.success('Job description generated with AI!');
+      const { fields } = await parseRequirement(descriptionText).unwrap();
+      const { description: _description, ...otherFields } = fields;
+      form.setFieldsValue(otherFields);
+      message.success('Fields extracted — review and adjust below.');
     } catch (err) {
       if (err?.status === 503) {
         message.error('AI is not configured on the server (missing ANTHROPIC_API_KEY).');
       } else {
-        console.error('AI job summary failed:', err);
-        message.error('Failed to generate job description.');
+        console.error('Requirement parse failed:', err);
+        message.error('Failed to parse requirement text.');
       }
     } finally {
-      setIsGenerating(false);
+      setIsParsingRequirement(false);
     }
   };
 
@@ -669,13 +673,17 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
 
       {/* Grid displaying current requirements */}
       {viewMode === 'card' ? (
-      <Row gutter={[16, 16]}>
+      <Row gutter={[16, 16]} align="stretch">
         {visibleRequirements.map((req) => (
-          <Col xs={24} sm={12} lg={6} key={req.id}>
-            <Card bordered={true} style={{ background: '#fff', borderRadius: 8 }}>
+          <Col xs={24} sm={12} lg={6} key={req.id} style={{ height: 'auto' }}>
+            <Card
+              bordered={true}
+              style={{ background: '#fff', borderRadius: 8, height: '100%' }}
+              styles={{ body: { height: '100%', display: 'flex', flexDirection: 'column' } }}
+            >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
-                <Title level={4} style={{ margin: 0 }}>{req.title}</Title>
-                <Tag color={STATUS_COLOR[getStatus(req)]} style={{ marginLeft: 8, textTransform: 'capitalize' }}>
+                <Title level={4} style={{ margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{req.title}</Title>
+                <Tag color={STATUS_COLOR[getStatus(req)]} style={{ marginLeft: 8, textTransform: 'capitalize', flexShrink: 0 }}>
                   {getStatus(req)}
                 </Tag>
               </div>
@@ -685,13 +693,13 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
                 {req.publishDate && <div><strong>Publish Date:</strong> {req.publishDate}</div>}
               </div>
               <div style={{ marginBottom: 12, fontSize: 12, color: '#666', lineHeight: 1.5 }}>
-                <strong>Description:</strong> {req.description ? `${req.description.slice(0, 100)}…` : 'No description.'}
+                <strong>Description:</strong> {req.description ? `${stripHtml(req.description).slice(0, 100)}…` : 'No description.'}
               </div>
-              <div style={{ marginBottom: 12, fontSize: 12 }}>
-                <div><strong>Must-haves:</strong> {(req.mustHaves ?? []).join(', ') || '—'}</div>
-                <div><strong>Nice-to-haves:</strong> {(req.niceToHaves ?? []).join(', ') || '—'}</div>
+              <div style={{ marginBottom: 12, fontSize: 12, flex: 1, overflow: 'hidden' }}>
+                <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}><strong>Must-haves:</strong> {(req.mustHaves ?? []).join(', ') || '—'}</div>
+                <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}><strong>Nice-to-haves:</strong> {(req.niceToHaves ?? []).join(', ') || '—'}</div>
                 {(req.regions ?? []).length > 0 && (
-                  <div><strong>Regions:</strong> {req.regions.join(', ')}</div>
+                  <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}><strong>Regions:</strong> {req.regions.join(', ')}</div>
                 )}
               </div>
               <Button
@@ -837,10 +845,13 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
               title: 'Candidate',
               key: 'candidate',
               render: (_, c) => (
-                <Space>
+                <Space
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => setProfileCandidate(candidateList.find((cd) => String(cd.id) === String(c.id)) ?? c)}
+                >
                   <Avatar icon={<UserOutlined />} style={{ backgroundColor: '#1677ff', flexShrink: 0 }} />
                   <div>
-                    <div style={{ fontWeight: 600, fontSize: 13 }}>{c.name}</div>
+                    <div style={{ fontWeight: 600, fontSize: 13, color: '#1677ff' }}>{c.name}</div>
                     <div style={{ fontSize: 11, color: '#8c8c8c' }}>{c.email || '—'}</div>
                   </div>
                 </Space>
@@ -1176,6 +1187,14 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
         requirement={viewReq}
       />
 
+      {/* Candidate Profile Modal — triggered from View Details candidate table */}
+      <CandidateProfileModal
+        candidate={profileCandidate}
+        open={!!profileCandidate}
+        onClose={() => setProfileCandidate(null)}
+        onCandidateUpdate={setProfileCandidate}
+      />
+
       {/* --- New / Edit Requirement Modal Form --- */}
       <Modal
         title={<Title level={3} style={{ margin: 0 }}>{editingReq ? 'Edit Requirement' : 'Create Requirement'}</Title>}
@@ -1203,6 +1222,51 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
           style={{ marginTop: 16 }}
           requiredMark="optional"
         >
+          {/* Job Description Summary — first field in the form */}
+          <Form.Item
+            name="description"
+            required
+            label={
+              <Flex justify="space-between" align="center" style={{ width: '100%' }}>
+                <span>Job Description Summary</span>
+                <Tooltip title={isJdGenerationEnabled ? 'Extract the other fields from this description using AI (description is left as-is)' : 'Parse with AI is disabled in Settings'}>
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={<ThunderboltOutlined style={{ color: '#722ed1' }} />}
+                    loading={isParsingRequirement}
+                    disabled={!isJdGenerationEnabled}
+                    onClick={handleParseRequirement}
+                    style={{
+                      color: '#722ed1',
+                      backgroundColor: '#f9f0ff',
+                      borderRadius: '4px',
+                      padding: '0 8px',
+                      fontSize: '12px',
+                      fontWeight: 500,
+                    }}
+                  >
+                    Parse with AI
+                  </Button>
+                </Tooltip>
+              </Flex>
+            }
+          >
+            <ReactQuill
+              theme="snow"
+              placeholder="Enter job role baseline description, then click Parse with AI to auto-fill the other fields..."
+              style={{ background: '#fff' }}
+              modules={{
+                toolbar: [
+                  ['bold', 'italic', 'underline'],
+                  [{ list: 'ordered' }, { list: 'bullet' }],
+                  ['link'],
+                  ['clean'],
+                ],
+              }}
+            />
+          </Form.Item>
+
           {/* Title input field */}
           <Form.Item
             name="title"
@@ -1370,44 +1434,6 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
             </Form.Item>
           )}
 
-          {/* Core Job Context description block */}
-          {/* <Form.Item
-            name="description"
-            label="Job Description Summary"
-            rules={[{ required: true, message: 'Please add brief description metrics' }]}
-          > */}
-          <Form.Item
-            name="description"
-            required
-            label={
-              <Flex justify="space-between" align="center" style={{ width: '100%' }}>
-                <span>Job Description Summary</span>
-                <Tooltip title={isJdGenerationEnabled ? 'Auto-fill optimized description using AI' : 'AI JD Generation is disabled in Settings'}>
-                  <Button
-                    type="text"
-                    size="small"
-                    icon={<ThunderboltOutlined style={{ color: '#722ed1' }} />} // Native Antd Icon
-                    loading={isGenerating}
-                    disabled={!isJdGenerationEnabled}
-                    onClick={handleAIFill}
-                    style={{
-                      color: '#722ed1',
-                      backgroundColor: '#f9f0ff',
-                      borderRadius: '4px',
-                      padding: '0 8px',
-                      fontSize: '12px',
-                      fontWeight: 500
-                    }}
-                  >
-                    Auto-Fill with AI
-                  </Button>
-                </Tooltip>
-              </Flex>
-            }
-          >
-            <TextArea rows={4} placeholder="Enter job role baseline description..." />
-          </Form.Item>
-
         {/* Live Market Intelligence Section */}
         {isMarketIntelligenceEnabled && (
         <Card
@@ -1572,11 +1598,20 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
                 Include Job Description
               </Checkbox>
               {shareIncludeJd && (
-                <TextArea
-                  rows={6}
+                <ReactQuill
+                  theme="snow"
                   value={shareJdText}
-                  onChange={(e) => setShareJdText(e.target.value)}
+                  onChange={setShareJdText}
                   placeholder="Job description to share..."
+                  style={{ background: '#fff' }}
+                  modules={{
+                    toolbar: [
+                      ['bold', 'italic', 'underline'],
+                      [{ list: 'ordered' }, { list: 'bullet' }],
+                      ['link'],
+                      ['clean'],
+                    ],
+                  }}
                 />
               )}
             </div>

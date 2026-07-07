@@ -1,34 +1,12 @@
 import React, { useRef, useState } from 'react';
-import { Button, Card, Input, Space, Pagination, message, Spin, Modal, Descriptions, Tag, Tooltip } from 'antd';
-import { SearchOutlined, UploadOutlined, DownloadOutlined, ThunderboltOutlined } from '@ant-design/icons';
+import { Button, Card, Input, Space, Pagination, message, Spin, Tag, Tooltip } from 'antd';
+import { SearchOutlined, UploadOutlined } from '@ant-design/icons';
 import {
   useGetAllCandidatesQuery,
   useUploadResumeMutation,
   useDeleteCandidateMutation,
-  useGetResumeUrlQuery,
-  useReparseWithAiMutation,
 } from '../redux/candidateApi';
-
-const ResumeDownloadButton = ({ candidateId }) => {
-  const { data, isFetching, isError } = useGetResumeUrlQuery(candidateId, { skip: !candidateId });
-
-  const handleDownload = () => {
-    if (data?.url) window.open(data.url, '_blank');
-  };
-
-  if (isError) return <Tooltip title="No resume on file"><Button icon={<DownloadOutlined />} disabled>Download Resume</Button></Tooltip>;
-
-  return (
-    <Button
-      icon={<DownloadOutlined />}
-      loading={isFetching}
-      onClick={handleDownload}
-      disabled={!data?.url}
-    >
-      Download Resume
-    </Button>
-  );
-};
+import CandidateProfileModal from './CandidateProfileModal';
 
 const Candidates = () => {
   const [page, setPage] = useState(1);
@@ -43,23 +21,12 @@ const Candidates = () => {
   const { data: candidates = [], isLoading, isFetching } = useGetAllCandidatesQuery();
   const [uploadResume, { isLoading: isUploading }] = useUploadResumeMutation();
   const [deleteCandidate] = useDeleteCandidateMutation();
-  const [reparseWithAi, { isLoading: isReparsingWithAi }] = useReparseWithAiMutation();
 
   const handleUploadClick = () => fileInputRef.current?.click();
 
   const handleViewProfile = (candidate) => {
     setSelectedCandidate(candidate);
     setIsModalOpen(true);
-  };
-
-  const handleReparseWithAi = async () => {
-    try {
-      const updated = await reparseWithAi(selectedCandidate.id).unwrap();
-      setSelectedCandidate(updated);
-      message.success('Resume parsed with Claude — profile updated');
-    } catch (e) {
-      message.error(e?.data?.error ?? 'Failed to parse resume with Claude');
-    }
   };
 
   const handleCloseModal = () => {
@@ -252,131 +219,12 @@ const Candidates = () => {
         </Spin>
       </Card>
 
-      {/* Profile Details Modal Screen */}
-      <Modal
-        title="Candidate Profile Details"
+      <CandidateProfileModal
+        candidate={selectedCandidate}
         open={isModalOpen}
-        onCancel={handleCloseModal}
-        afterClose={() => setSelectedCandidate(null)}
-        footer={[
-          selectedCandidate?.resumeS3Key
-            ? <ResumeDownloadButton key="download" candidateId={selectedCandidate.id} />
-            : null,
-          <Tooltip
-            key="parse-tooltip"
-            title={selectedCandidate?.aiParsed ? 'Already parsed with Claude' : (!selectedCandidate?.resumeS3Key ? 'No resume on file' : '')}
-          >
-            <Button
-              icon={<ThunderboltOutlined />}
-              loading={isReparsingWithAi}
-              disabled={!!selectedCandidate?.aiParsed || !selectedCandidate?.resumeS3Key}
-              onClick={handleReparseWithAi}
-            >
-              Parse with Claude
-            </Button>
-          </Tooltip>,
-          <Button key="close" type="primary" onClick={handleCloseModal}>
-            Close
-          </Button>,
-        ].filter(Boolean)}
-        width={800}
-        destroyOnClose
-      >
-        {selectedCandidate && (
-          <div style={{ marginTop: 16 }}>
-            {/* Summary banner — only shown when AI-parsed */}
-            {selectedCandidate.summary && (
-              <div style={{
-                background: '#f0f5ff', border: '1px solid #adc6ff', borderRadius: 6,
-                padding: '10px 14px', marginBottom: 16, color: '#1d3557', fontSize: 13,
-              }}>
-                {selectedCandidate.summary}
-              </div>
-            )}
-
-            <Descriptions bordered column={2} size="small">
-              <Descriptions.Item label="Full Name" span={2}>
-                <strong>{selectedCandidate.name || 'N/A'}</strong>
-                {selectedCandidate.title && (
-                  <span style={{ marginLeft: 8, color: '#6b7280', fontWeight: 400 }}>
-                    — {selectedCandidate.title}
-                  </span>
-                )}
-              </Descriptions.Item>
-              <Descriptions.Item label="Email">{selectedCandidate.email || 'N/A'}</Descriptions.Item>
-              <Descriptions.Item label="Phone">{selectedCandidate.phone || 'N/A'}</Descriptions.Item>
-              {selectedCandidate.location && (
-                <Descriptions.Item label="Location">{selectedCandidate.location}</Descriptions.Item>
-              )}
-              {selectedCandidate.yearsOfExperience > 0 && (
-                <Descriptions.Item label="Experience">
-                  {selectedCandidate.yearsOfExperience} year{selectedCandidate.yearsOfExperience !== 1 ? 's' : ''}
-                </Descriptions.Item>
-              )}
-              <Descriptions.Item label="Source">{selectedCandidate.source || 'N/A'}</Descriptions.Item>
-              <Descriptions.Item label="Date Added">{selectedCandidate.date || 'N/A'}</Descriptions.Item>
-
-              <Descriptions.Item label="Skills" span={2}>
-                <Space size={[4, 8]} wrap>
-                  {(selectedCandidate.skills || []).length > 0 ? (
-                    selectedCandidate.skills.map((skill) => (
-                      <Tag color="blue" key={skill}>{skill}</Tag>
-                    ))
-                  ) : (
-                    <span style={{ color: '#9ca3af' }}>No parsed skills found</span>
-                  )}
-                </Space>
-              </Descriptions.Item>
-
-              {(selectedCandidate.certifications || []).length > 0 && (
-                <Descriptions.Item label="Certifications" span={2}>
-                  <Space size={[4, 8]} wrap>
-                    {selectedCandidate.certifications.map((c) => (
-                      <Tag color="green" key={c}>{c}</Tag>
-                    ))}
-                  </Space>
-                </Descriptions.Item>
-              )}
-
-              {(selectedCandidate.languages || []).length > 0 && (
-                <Descriptions.Item label="Languages" span={2}>
-                  {selectedCandidate.languages.join(', ')}
-                </Descriptions.Item>
-              )}
-            </Descriptions>
-
-            {/* Work Experience */}
-            {(selectedCandidate.experience || []).length > 0 && (
-              <div style={{ marginTop: 16 }}>
-                <div style={{ fontWeight: 600, marginBottom: 8, color: '#374151' }}>Work Experience</div>
-                {selectedCandidate.experience.map((exp, i) => (
-                  <div key={i} style={{
-                    borderLeft: '3px solid #6366f1', paddingLeft: 12, marginBottom: 12,
-                  }}>
-                    <div style={{ fontWeight: 600 }}>{exp.title} <span style={{ color: '#6b7280', fontWeight: 400 }}>@ {exp.company}</span></div>
-                    <div style={{ fontSize: 12, color: '#9ca3af', marginBottom: 4 }}>{exp.startDate} – {exp.endDate}</div>
-                    {exp.description && <div style={{ fontSize: 13 }}>{exp.description}</div>}
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Education */}
-            {(selectedCandidate.education || []).length > 0 && (
-              <div style={{ marginTop: 16 }}>
-                <div style={{ fontWeight: 600, marginBottom: 8, color: '#374151' }}>Education</div>
-                {selectedCandidate.education.map((edu, i) => (
-                  <div key={i} style={{ marginBottom: 8 }}>
-                    <span style={{ fontWeight: 500 }}>{edu.degree}</span>
-                    {edu.institution && <span style={{ color: '#6b7280' }}> — {edu.institution}</span>}
-                    {edu.year && <span style={{ color: '#9ca3af', fontSize: 12 }}> ({edu.year})</span>}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-      </Modal>
+        onClose={handleCloseModal}
+        onCandidateUpdate={setSelectedCandidate}
+      />
     </>
   );
 };
