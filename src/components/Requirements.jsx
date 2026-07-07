@@ -1,6 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { REGION_OPTIONS } from '../constants/regions';
 import dayjs from 'dayjs';
+import utc from 'dayjs/plugin/utc';
+import timezone from 'dayjs/plugin/timezone';
+
+dayjs.extend(utc);
+dayjs.extend(timezone);
 import { useGetRequirementsQuery, useAddRequirementMutation, useUpdateRequirementMutation, useGetDepartmentsQuery, useShareRequirementMutation } from '../redux/requirementsApi';
 import { useGetVendorsQuery, useGetGroupsQuery } from '../redux/vendorApi';
 import { useUploadResumeMutation,useGetAllCandidatesQuery } from '../redux/candidateApi';
@@ -139,6 +144,16 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
   const watchedMustHaves = Form.useWatch('mustHaves', form);
   const watchedLocation = Form.useWatch('location', form);
   const watchedWorkMode = Form.useWatch('workMode', form);
+  const watchedStatus = Form.useWatch('status', form);
+
+  // When the requirement is set to "open", default Publish Date to today (in the
+  // logged-in user's configured timezone from Settings → My Timezone) unless already set.
+  useEffect(() => {
+    if (watchedStatus === 'open' && !form.getFieldValue('publishDate')) {
+      const tz = userSettings?.timezone;
+      form.setFieldsValue({ publishDate: tz ? dayjs().tz(tz) : dayjs() });
+    }
+  }, [watchedStatus, userSettings]);
   // Mock live market state (This would ideally update via your Dice MCP backend debounce)
   const [marketData, setMarketData] = useState({
     supply: { count: 0, level: 'High Competition', status: 'error' },
@@ -1201,7 +1216,7 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
         open={isModalOpen}
         onCancel={handleCancel}
         footer={null}
-        width={600}
+        width={900}
         afterOpenChange={(open) => {
           if (open) {
             if (editingReq) {
