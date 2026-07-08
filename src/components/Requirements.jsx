@@ -9,7 +9,7 @@ dayjs.extend(timezone);
 import { useGetRequirementsQuery, useAddRequirementMutation, useUpdateRequirementMutation, useGetDepartmentsQuery, useShareRequirementMutation } from '../redux/requirementsApi';
 import { useGetVendorsQuery, useGetGroupsQuery } from '../redux/vendorApi';
 import { useUploadResumeMutation,useGetAllCandidatesQuery } from '../redux/candidateApi';
-import { useLazyGetPipelineStagesQuery, useSavePipelineStagesMutation } from '../redux/pipelineStagesApi';
+import { useLazyGetPipelineStagesQuery, useSavePipelineStagesMutation, useGetPipelineStagesQuery } from '../redux/pipelineStagesApi';
 import { useGetMarketIntelligenceMutation, useRankCandidatesMutation, useParseRequirementMutation } from '../redux/intelligenceApi';
 import { useGetExamByRequirementQuery, useGenerateExamMutation, useSendExamInviteMutation, useLazyGetSubmissionQuery } from '../redux/examApi';
 import { useGetUserSettingsQuery, useGetExamSettingsQuery } from '../redux/settingsApi';
@@ -105,6 +105,34 @@ const { TextArea } = Input;
 // Pipeline stage display metadata
 const STAGE_LABELS = { ingested: 'Ingested', ranked: 'Ranked', l1: 'L1 (Exam)', l2: 'L2 (Recruiter)', l3: 'L3 (Final)' };
 const STAGE_COLORS = { ingested: 'blue', ranked: 'gold', l1: 'purple', l2: 'cyan', l3: 'green' };
+
+// Mini per-stage progress bars showing candidate distribution across the pipeline for a card.
+const PipelineProgressMini = ({ requirementId }) => {
+  const { data: stages } = useGetPipelineStagesQuery(requirementId, { skip: !requirementId });
+  const counts = STAGE_KEYS.reduce((acc, s) => ({ ...acc, [s]: (stages?.[s] ?? []).length }), {});
+  const total = Object.values(counts).reduce((a, b) => a + b, 0);
+
+  if (!total) {
+    return <Text type="secondary" style={{ fontSize: 12 }}>No candidates in pipeline yet.</Text>;
+  }
+
+  return (
+    <Flex vertical gap={4} style={{ width: '100%' }}>
+      {STAGE_KEYS.map((s) => (
+        <Flex key={s} align="center" gap={8}>
+          <Text style={{ fontSize: 11, width: 76, flexShrink: 0, color: '#666' }}>{STAGE_LABELS[s]}</Text>
+          <Progress
+            percent={Math.round((counts[s] / total) * 100)}
+            size="small"
+            strokeColor={STAGE_COLORS[s]}
+            format={() => counts[s]}
+            style={{ flex: 1 }}
+          />
+        </Flex>
+      ))}
+    </Flex>
+  );
+};
 
 const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqIdConsumed, region = 'global' }) => {
   // State management for Modal visibility and submitting loader
@@ -707,15 +735,9 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
                 <div><strong>Open Date:</strong> {req.openDate}</div>
                 {req.publishDate && <div><strong>Publish Date:</strong> {req.publishDate}</div>}
               </div>
-              <div style={{ marginBottom: 12, fontSize: 12, color: '#666', lineHeight: 1.5 }}>
-                <strong>Description:</strong> {req.description ? `${stripHtml(req.description).slice(0, 100)}…` : 'No description.'}
-              </div>
-              <div style={{ marginBottom: 12, fontSize: 12, flex: 1, overflow: 'hidden' }}>
-                <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}><strong>Must-haves:</strong> {(req.mustHaves ?? []).join(', ') || '—'}</div>
-                <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}><strong>Nice-to-haves:</strong> {(req.niceToHaves ?? []).join(', ') || '—'}</div>
-                {(req.regions ?? []).length > 0 && (
-                  <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}><strong>Regions:</strong> {req.regions.join(', ')}</div>
-                )}
+              <div style={{ marginBottom: 12, fontSize: 12, flex: 1 }}>
+                <Text strong style={{ fontSize: 12, display: 'block', marginBottom: 6 }}>Pipeline Status</Text>
+                <PipelineProgressMini requirementId={req.id} />
               </div>
               <Button
                 type="primary"

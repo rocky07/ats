@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="100%" height="100%">
+  <!-- 
+    The original circle had a radius (r) of 11 and a stroke-width of 9.
+    Making it 3 times larger:
+    - New Radius = 11 * 3 = 33
+    - New Stroke Width = 9 * 3 = 27
+  -->
+  <circle cx="100" cy="100" r="33" fill="none" stroke="#f04e23" stroke-width="27" />
+</svg>
+
