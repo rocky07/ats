@@ -1413,6 +1413,8 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
                   <Select.Option value="Full-time">Full-time</Select.Option>
                   <Select.Option value="W2">W2 (Contract)</Select.Option>
                   <Select.Option value="C2C">C2C (Corp-to-Corp)</Select.Option>
+                  <Select.Option value="Contract">Contract</Select.Option>
+                  <Select.Option value="Contract-1099">Contract (1099)</Select.Option>
                 </Select>
               </Form.Item>
             </Col>
@@ -1450,18 +1452,10 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
           {(jobType === 'W2' || jobType === 'C2C') && (
             <Form.Item label={`Hourly Rate Range — ${jobType} ($/hr)`}>
               <Space.Compact style={{ width: '100%' }}>
-                <Form.Item
-                  name="hourlyRateMin"
-                  noStyle
-                  rules={[{ required: true, message: 'Enter a minimum hourly rate' }]}
-                >
+                <Form.Item name="hourlyRateMin" noStyle>
                   <InputNumber size="large" placeholder="Min $/hr" min={0} step={5} style={{ width: '50%' }} />
                 </Form.Item>
-                <Form.Item
-                  name="hourlyRateMax"
-                  noStyle
-                  rules={[{ required: true, message: 'Enter a maximum hourly rate' }]}
-                >
+                <Form.Item name="hourlyRateMax" noStyle>
                   <InputNumber size="large" placeholder="Max $/hr" min={0} step={5} style={{ width: '50%' }} />
                 </Form.Item>
               </Space.Compact>

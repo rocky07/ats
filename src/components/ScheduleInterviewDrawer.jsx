@@ -176,7 +176,9 @@ const ScheduleInterviewDrawer = ({ open, onClose, onScheduled, candidate, requir
 
   const disabledDate = (current) => current && current < dayjs().startOf('day');
 
-  const hasConflicts = conflictResult?.conflicts?.length > 0;
+  const realConflicts = conflictResult?.conflicts?.filter((c) => !c.accessError) ?? [];
+  const uncheckableAttendees = conflictResult?.conflicts?.filter((c) => c.accessError) ?? [];
+  const hasConflicts = realConflicts.length > 0;
 
   return (
     <Drawer
@@ -326,7 +328,7 @@ const ScheduleInterviewDrawer = ({ open, onClose, onScheduled, candidate, requir
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {panelMembers.map((member) => {
-                  const hasConflict = conflictResult?.conflicts?.some((c) => c.email === member.email);
+                  const hasConflict = realConflicts.some((c) => c.email === member.email);
                   return (
                     <div
                       key={member.id}
@@ -373,7 +375,7 @@ const ScheduleInterviewDrawer = ({ open, onClose, onScheduled, candidate, requir
                 })}
 
                 {extraInterviewers.map((member) => {
-                  const hasConflict = conflictResult?.conflicts?.some((c) => c.email === member.email);
+                  const hasConflict = realConflicts.some((c) => c.email === member.email);
                   return (
                     <div
                       key={member.email}
@@ -458,7 +460,7 @@ const ScheduleInterviewDrawer = ({ open, onClose, onScheduled, candidate, requir
                   style={{ fontSize: 12 }}
                 />
               )}
-              {conflictResult.configured && !hasConflicts && (
+              {conflictResult.configured && !hasConflicts && uncheckableAttendees.length === 0 && (
                 <Alert
                   type="success"
                   showIcon
@@ -466,31 +468,51 @@ const ScheduleInterviewDrawer = ({ open, onClose, onScheduled, candidate, requir
                   message="No conflicts found — all attendees are available!"
                 />
               )}
+
               {conflictResult.configured && hasConflicts && (
                 <Alert
                   type="warning"
                   showIcon
-                  message={`${conflictResult.conflicts.length} conflict(s) detected`}
+                  message={`${realConflicts.length} scheduling conflict${realConflicts.length > 1 ? 's' : ''} detected`}
                   description={
                     <div style={{ marginTop: 6 }}>
-                      {conflictResult.conflicts.map((c, i) => (
-                        <div key={i} style={{ marginBottom: 6 }}>
+                      {realConflicts.map((c, i) => (
+                        <div key={i} style={{ marginBottom: i < realConflicts.length - 1 ? 10 : 4 }}>
                           <Text strong style={{ fontSize: 12 }}>{c.email}</Text>
-                          {c.accessError ? (
-                            <div style={{ fontSize: 11, color: '#888' }}>Calendar not accessible</div>
-                          ) : (
-                            c.events?.map((ev, j) => (
-                              <div key={j} style={{ fontSize: 11, color: '#666' }}>
-                                <ClockCircleOutlined style={{ marginRight: 4 }} />
-                                {ev.subject} ({dayjs(ev.start).format('HH:mm')}–{dayjs(ev.end).format('HH:mm')})
-                              </div>
-                            ))
-                          )}
+                          {c.events?.map((ev, j) => (
+                            <div key={j} style={{ fontSize: 11, color: '#666', marginTop: 2 }}>
+                              <ClockCircleOutlined style={{ marginRight: 4 }} />
+                              {ev.subject} ({dayjs(ev.start).format('HH:mm')}–{dayjs(ev.end).format('HH:mm')})
+                            </div>
+                          ))}
                         </div>
                       ))}
                       <Text type="secondary" style={{ fontSize: 11 }}>
                         You can still schedule — attendees will receive the invite and can accept or decline.
                       </Text>
+                    </div>
+                  }
+                />
+              )}
+
+              {conflictResult.configured && uncheckableAttendees.length > 0 && (
+                <Alert
+                  type="info"
+                  showIcon
+                  style={{ marginTop: hasConflicts ? 10 : 0 }}
+                  message={`Availability couldn't be checked for ${uncheckableAttendees.length} attendee${uncheckableAttendees.length > 1 ? 's' : ''}`}
+                  description={
+                    <div style={{ marginTop: 4 }}>
+                      <Space size={[6, 4]} wrap>
+                        {uncheckableAttendees.map((c, i) => (
+                          <Tag key={i} style={{ fontSize: 11 }}>{c.email}</Tag>
+                        ))}
+                      </Space>
+                      <div style={{ marginTop: 6 }}>
+                        <Text type="secondary" style={{ fontSize: 11 }}>
+                          These attendees don't have a calendar in this Microsoft 365 organization (e.g. external or personal email addresses), so conflicts can't be checked automatically. They'll still receive the invite.
+                        </Text>
+                      </div>
                     </div>
                   }
                 />
