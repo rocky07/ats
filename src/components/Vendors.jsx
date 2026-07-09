@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import {
   Button, Card, Input, Space, Table, Tag, Modal, Upload, Typography,
-  message, Segmented, List, Empty, Select, Popconfirm, Spin,
+  message, Segmented, List, Empty, Select, Popconfirm, Spin, Form,
 } from 'antd';
 import {
   SearchOutlined, ImportOutlined, InboxOutlined, PlusOutlined,
@@ -96,12 +96,15 @@ const Vendors = () => {
   const [activeTab,   setActiveTab]   = useState(ALL_VENDORS);
   const [importOpen,  setImportOpen]  = useState(false);
   const [manageOpen,  setManageOpen]  = useState(false);
+  const [addOpen,     setAddOpen]     = useState(false);
   const [newGroup,    setNewGroup]    = useState('');
   const [editingGroup, setEditingGroup] = useState(null); // { name, draft }
+  const [addForm] = Form.useForm();
 
   const { data: vendors  = [], isLoading: loadingVendors } = useGetVendorsQuery();
   const { data: groups   = [], isLoading: loadingGroups  } = useGetGroupsQuery();
 
+  const [createVendor]      = useCreateVendorMutation();
   const [updateVendor]      = useUpdateVendorMutation();
   const [deleteVendor]      = useDeleteVendorMutation();
   const [bulkImport]        = useBulkImportVendorsMutation();
@@ -130,6 +133,21 @@ const Vendors = () => {
       await updateVendor(patch).unwrap();
     } catch {
       message.error('Failed to save change');
+    }
+  };
+
+  // ── Add vendor ────────────────────────────────────────────────────────────
+
+  const handleAddVendor = async () => {
+    try {
+      const values = await addForm.validateFields();
+      await createVendor({ status: 'Pending', ...values }).unwrap();
+      message.success(`Vendor "${values.name}" added`);
+      addForm.resetFields();
+      setAddOpen(false);
+    } catch (e) {
+      if (e?.errorFields) return;
+      message.error(e?.data?.error ?? 'Failed to add vendor');
     }
   };
 
@@ -305,14 +323,23 @@ const Vendors = () => {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
-        <Button
-          type="primary"
-          icon={<ImportOutlined />}
-          onClick={() => setImportOpen(true)}
-          style={{ backgroundColor: '#2563eb', height: 40, paddingInline: 24 }}
-        >
-          Import Microsoft Contacts
-        </Button>
+        <Space>
+          <Button
+            icon={<PlusOutlined />}
+            onClick={() => setAddOpen(true)}
+            style={{ height: 40, paddingInline: 24 }}
+          >
+            Add Vendor
+          </Button>
+          <Button
+            type="primary"
+            icon={<ImportOutlined />}
+            onClick={() => setImportOpen(true)}
+            style={{ backgroundColor: '#2563eb', height: 40, paddingInline: 24 }}
+          >
+            Import Microsoft Contacts
+          </Button>
+        </Space>
       </div>
 
       {/* Main Table */}
@@ -324,6 +351,35 @@ const Vendors = () => {
           pagination={{ pageSize: 10, showSizeChanger: true }}
         />
       </Card>
+
+      {/* Add Vendor Modal */}
+      <Modal
+        title="Add Vendor"
+        open={addOpen}
+        onCancel={() => { setAddOpen(false); addForm.resetFields(); }}
+        onOk={handleAddVendor}
+        okText="Add"
+        okButtonProps={{ style: { backgroundColor: '#2563eb' } }}
+        destroyOnClose
+      >
+        <Form form={addForm} layout="vertical" style={{ marginTop: 16 }}>
+          <Form.Item name="name" label="Name" rules={[{ required: true, message: 'Name is required' }]}>
+            <Input placeholder="Vendor name" />
+          </Form.Item>
+          <Form.Item name="email" label="Email" rules={[{ type: 'email', message: 'Enter a valid email' }]}>
+            <Input placeholder="vendor@example.com" />
+          </Form.Item>
+          <Form.Item name="phone" label="Phone">
+            <Input placeholder="Phone number" />
+          </Form.Item>
+          <Form.Item name="company" label="Company">
+            <Input placeholder="Company name" />
+          </Form.Item>
+          <Form.Item name="group" label="Group">
+            <Select allowClear placeholder="None" options={groups.map((g) => ({ value: g, label: g }))} />
+          </Form.Item>
+        </Form>
+      </Modal>
 
       {/* Import Modal */}
       <Modal

@@ -5,7 +5,7 @@ import {
 } from 'antd';
 import {
   TeamOutlined, CalendarOutlined, LinkOutlined, WarningOutlined,
-  CheckCircleOutlined, UserOutlined, ClockCircleOutlined,
+  CheckCircleOutlined, UserOutlined, ClockCircleOutlined, PlusOutlined, CloseOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
@@ -32,6 +32,9 @@ const roleColor = { 'Tech Lead': 'blue', 'Senior Engineer': 'green', 'HR Manager
 const ScheduleInterviewDrawer = ({ open, onClose, onScheduled, candidate, requirement, region = 'global' }) => {
   const [form] = Form.useForm();
   const [selectedPanel, setSelectedPanel] = useState([]);
+  const [extraInterviewers, setExtraInterviewers] = useState([]); // [{ name, email }]
+  const [newInterviewerName, setNewInterviewerName] = useState('');
+  const [newInterviewerEmail, setNewInterviewerEmail] = useState('');
   const [conflictResult, setConflictResult] = useState(null);
   const [checkingConflicts, setCheckingConflicts] = useState(false);
   const [scheduledMeeting, setScheduledMeeting] = useState(null);
@@ -51,6 +54,8 @@ const ScheduleInterviewDrawer = ({ open, onClose, onScheduled, candidate, requir
     if (open && panelMembers.length > 0) {
       setConflictResult(null);
       setScheduledMeeting(null);
+      setNewInterviewerName('');
+      setNewInterviewerEmail('');
       if (isReschedule && candidate.interviewData) {
         const prev = candidate.interviewData;
         form.setFieldsValue({
@@ -58,13 +63,42 @@ const ScheduleInterviewDrawer = ({ open, onClose, onScheduled, candidate, requir
           duration: prev.durationMinutes ?? 60,
           notes: prev.notes ?? '',
         });
-        setSelectedPanel(prev.panelEmails ?? panelMembers.map((m) => m.email));
+        const prevPanelEmails = prev.panelEmails ?? panelMembers.map((m) => m.email);
+        setSelectedPanel(prevPanelEmails);
+        const panelEmailSet = new Set(panelMembers.map((m) => m.email));
+        setExtraInterviewers(
+          prevPanelEmails
+            .filter((e) => !panelEmailSet.has(e))
+            .map((e) => ({ name: e, email: e })),
+        );
       } else {
         form.resetFields();
         setSelectedPanel(panelMembers.map((m) => m.email));
+        setExtraInterviewers([]);
       }
     }
   }, [open, panelMembers]);
+
+  const handleAddInterviewer = () => {
+    const email = newInterviewerEmail.trim();
+    if (!email) { message.warning('Enter an email address'); return; }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) { message.warning('Enter a valid email address'); return; }
+    const alreadyExists =
+      panelMembers.some((m) => m.email === email) || extraInterviewers.some((m) => m.email === email);
+    if (alreadyExists) { message.warning('This person is already in the panel'); return; }
+
+    const name = newInterviewerName.trim() || email;
+    setExtraInterviewers((prev) => [...prev, { name, email }]);
+    setSelectedPanel((prev) => [...prev, email]);
+    setNewInterviewerName('');
+    setNewInterviewerEmail('');
+  };
+
+  const handleRemoveInterviewer = (email) => {
+    setExtraInterviewers((prev) => prev.filter((m) => m.email !== email));
+    setSelectedPanel((prev) => prev.filter((e) => e !== email));
+  };
 
   const getTimeRange = () => {
     const dateTime = form.getFieldValue('dateTime');
@@ -270,7 +304,16 @@ const ScheduleInterviewDrawer = ({ open, onClose, onScheduled, candidate, requir
                 Interview Panel
               </Text>
               <Space size={4}>
-                <Button size="small" type="link" onClick={() => setSelectedPanel(panelMembers.map((m) => m.email))}>
+                <Button
+                  size="small"
+                  type="link"
+                  onClick={() =>
+                    setSelectedPanel([
+                      ...panelMembers.map((m) => m.email),
+                      ...extraInterviewers.map((m) => m.email),
+                    ])
+                  }
+                >
                   All
                 </Button>
                 <Button size="small" type="link" onClick={() => setSelectedPanel([])}>
@@ -328,8 +371,79 @@ const ScheduleInterviewDrawer = ({ open, onClose, onScheduled, candidate, requir
                     </div>
                   );
                 })}
+
+                {extraInterviewers.map((member) => {
+                  const hasConflict = conflictResult?.conflicts?.some((c) => c.email === member.email);
+                  return (
+                    <div
+                      key={member.email}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '8px 12px',
+                        borderRadius: 6,
+                        border: `1px solid ${hasConflict ? '#ff4d4f' : '#e8e8e8'}`,
+                        background: hasConflict ? '#fff2f0' : '#fafafa',
+                      }}
+                    >
+                      <Space style={{ cursor: 'pointer', flex: 1 }} onClick={() =>
+                        setSelectedPanel((prev) =>
+                          prev.includes(member.email)
+                            ? prev.filter((e) => e !== member.email)
+                            : [...prev, member.email],
+                        )
+                      }>
+                        <Checkbox checked={selectedPanel.includes(member.email)} />
+                        <Avatar size={28} style={{ backgroundColor: '#64748b', fontSize: 12 }}>
+                          {member.name[0]}
+                        </Avatar>
+                        <div>
+                          <Text strong style={{ fontSize: 13 }}>{member.name}</Text>
+                          <div style={{ fontSize: 11, color: '#888' }}>{member.email}</div>
+                        </div>
+                      </Space>
+                      <Space size={4}>
+                        <Tag color="default" style={{ fontSize: 10 }}>Guest</Tag>
+                        {hasConflict && (
+                          <Tooltip title="Has a conflicting event at this time">
+                            <WarningOutlined style={{ color: '#ff4d4f' }} />
+                          </Tooltip>
+                        )}
+                        <Button
+                          size="small"
+                          type="text"
+                          icon={<CloseOutlined />}
+                          onClick={() => handleRemoveInterviewer(member.email)}
+                        />
+                      </Space>
+                    </div>
+                  );
+                })}
               </div>
             )}
+
+            {/* Add interviewer not on the panel */}
+            <div style={{ marginTop: 10, display: 'flex', gap: 6 }}>
+              <Input
+                size="small"
+                placeholder="Name (optional)"
+                value={newInterviewerName}
+                onChange={(e) => setNewInterviewerName(e.target.value)}
+                style={{ flex: 1 }}
+              />
+              <Input
+                size="small"
+                placeholder="Email address"
+                value={newInterviewerEmail}
+                onChange={(e) => setNewInterviewerEmail(e.target.value)}
+                onPressEnter={handleAddInterviewer}
+                style={{ flex: 1.4 }}
+              />
+              <Button size="small" icon={<PlusOutlined />} onClick={handleAddInterviewer}>
+                Add
+              </Button>
+            </div>
           </div>
 
           {/* ── Conflict result ── */}
