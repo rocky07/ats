@@ -6,7 +6,7 @@ import timezone from 'dayjs/plugin/timezone';
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
-import { useGetRequirementsQuery, useAddRequirementMutation, useUpdateRequirementMutation, useGetDepartmentsQuery, useShareRequirementMutation } from '../redux/requirementsApi';
+import { useGetRequirementsQuery, useAddRequirementMutation, useUpdateRequirementMutation, useDeleteRequirementMutation, useGetDepartmentsQuery, useShareRequirementMutation } from '../redux/requirementsApi';
 import { useGetVendorsQuery, useGetGroupsQuery } from '../redux/vendorApi';
 import { useUploadResumeMutation,useGetAllCandidatesQuery } from '../redux/candidateApi';
 import { useLazyGetPipelineStagesQuery, useSavePipelineStagesMutation, useGetPipelineStagesQuery } from '../redux/pipelineStagesApi';
@@ -68,6 +68,7 @@ import {
   Radio,
   Rate,
   Switch,
+  Popconfirm,
 } from 'antd';
 import {
   FireOutlined,
@@ -147,6 +148,7 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
   // 3. Destructure the mutation trigger and its execution states
   const [addRequirement, { isLoading: isSubmitting }] = useAddRequirementMutation();
   const [updateRequirement] = useUpdateRequirementMutation();
+  const [deleteRequirement] = useDeleteRequirementMutation();
   const [editingReq, setEditingReq] = useState(null); // null = create mode, object = edit mode
   // Live candidates from the backend
   const { data: candidateList = [] } = useGetAllCandidatesQuery();
@@ -504,6 +506,15 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
     }
   };
 
+  const handleDelete = async (req) => {
+    try {
+      await deleteRequirement(req.id).unwrap();
+      message.success(`"${req.title}" deleted`);
+    } catch (e) {
+      message.error(e?.data?.error ?? 'Failed to delete requirement');
+    }
+  };
+
   const handleView = async (req) => {
     setViewReq(req);
     // Load the persisted pipeline stages for this requirement from the backend.
@@ -786,6 +797,21 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
                     />
                   </Tooltip>
                 </Col>
+                <Col xs={6}>
+                  <Popconfirm
+                    title="Delete this requirement?"
+                    description="This cannot be undone."
+                    onConfirm={() => handleDelete(req)}
+                  >
+                    <Tooltip title="Delete requirement">
+                      <Button
+                        danger
+                        icon={<DeleteOutlined />}
+                        style={{ width: '100%', height: 40 }}
+                      />
+                    </Tooltip>
+                  </Popconfirm>
+                </Col>
               </Row>
             </Card>
           </Col>
@@ -831,6 +857,15 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
                   <Button size="small" icon={<SettingOutlined />} onClick={() => openExamConfigModal(req)}>
                     Exam
                   </Button>
+                  <Popconfirm
+                    title="Delete this requirement?"
+                    description="This cannot be undone."
+                    onConfirm={() => handleDelete(req)}
+                  >
+                    <Button size="small" danger icon={<DeleteOutlined />}>
+                      Delete
+                    </Button>
+                  </Popconfirm>
                 </Space>
               ),
             },

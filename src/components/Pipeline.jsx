@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Button, Card, Typography, Select, Drawer, Input, Empty, message, Dropdown, Modal, Radio, Space, Tooltip, Segmented, Tag, Descriptions, Rate } from 'antd';
+import { Button, Card, Typography, Select, Drawer, Input, Empty, message, Dropdown, Modal, Radio, Space, Tooltip, Segmented, Tag, Descriptions, Rate, Popconfirm } from 'antd';
 import { PlusOutlined, TeamOutlined, SearchOutlined, DownOutlined, FileAddOutlined, DeleteOutlined, ShareAltOutlined, CopyOutlined, CompressOutlined, MailOutlined, CheckCircleOutlined, LinkOutlined, CalendarOutlined, ArrowLeftOutlined, UserOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import { useGetRequirementsQuery } from '../redux/requirementsApi';
 import { useGetPipelineStagesQuery, useSavePipelineStagesMutation } from '../redux/pipelineStagesApi';
@@ -149,6 +149,17 @@ const Pipeline = ({ reqId = null, region = 'global', onBack = null, backLabel = 
     if (selectedReqId != null) {
       savePipelineStages({ requirementId: selectedReqId, stages: nextData });
     }
+  };
+
+  // Remove a candidate card from the pipeline entirely and persist it.
+  const handleRemoveCandidate = (stageKey, candidateId) => {
+    const candidate = pipelineData[stageKey]?.find((c) => String(c.id) === String(candidateId));
+    const nextData = {
+      ...pipelineData,
+      [stageKey]: pipelineData[stageKey].filter((c) => String(c.id) !== String(candidateId)),
+    };
+    persistStages(nextData);
+    message.success(`${candidate?.name ?? 'Candidate'} removed from pipeline`);
   };
 
   // Rate a candidate (L2/L3 interview rounds only) and persist it.
@@ -566,6 +577,20 @@ const Pipeline = ({ reqId = null, region = 'global', onBack = null, backLabel = 
                         {(stage.key === 'l2' || stage.key === 'l3') && candidate.rating > 0 && (
                           <Tag color="gold" style={{ fontSize: 10, margin: 0 }}>★ {candidate.rating}</Tag>
                         )}
+                        <Popconfirm
+                          title="Remove this candidate from the pipeline?"
+                          onConfirm={() => handleRemoveCandidate(stage.key, candidate.id)}
+                        >
+                          <Tooltip title="Remove from pipeline">
+                            <Button
+                              size="small"
+                              danger
+                              icon={<DeleteOutlined />}
+                              onClick={(e) => e.stopPropagation()}
+                              style={{ fontSize: 10, height: 20, padding: '0 4px' }}
+                            />
+                          </Tooltip>
+                        </Popconfirm>
                       </Space>
                     </div>
                   ) : (
@@ -581,14 +606,30 @@ const Pipeline = ({ reqId = null, region = 'global', onBack = null, backLabel = 
                             <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 1 }}>{candidate.email}</div>
                           )}
                         </div>
-                        <Tooltip title="View candidate profile">
-                          <Button
-                            size="small"
-                            icon={<UserOutlined />}
-                            onClick={(e) => { e.stopPropagation(); setProfileCandidate(candidate); setProfileStage(stage.key); setProfileModalOpen(true); }}
-                            style={{ fontSize: 10, height: 22, padding: '0 6px', flexShrink: 0 }}
-                          />
-                        </Tooltip>
+                        <Space size={4} style={{ flexShrink: 0 }}>
+                          <Tooltip title="View candidate profile">
+                            <Button
+                              size="small"
+                              icon={<UserOutlined />}
+                              onClick={(e) => { e.stopPropagation(); setProfileCandidate(candidate); setProfileStage(stage.key); setProfileModalOpen(true); }}
+                              style={{ fontSize: 10, height: 22, padding: '0 6px' }}
+                            />
+                          </Tooltip>
+                          <Popconfirm
+                            title="Remove this candidate from the pipeline?"
+                            onConfirm={() => handleRemoveCandidate(stage.key, candidate.id)}
+                          >
+                            <Tooltip title="Remove from pipeline">
+                              <Button
+                                size="small"
+                                danger
+                                icon={<DeleteOutlined />}
+                                onClick={(e) => e.stopPropagation()}
+                                style={{ fontSize: 10, height: 22, padding: '0 6px' }}
+                              />
+                            </Tooltip>
+                          </Popconfirm>
+                        </Space>
                       </div>
 
                       {/* Skills */}
