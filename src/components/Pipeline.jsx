@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Button, Card, Typography, Select, Drawer, Input, Empty, message, Dropdown, Modal, Radio, Space, Tooltip, Segmented, Tag, Descriptions, Rate, Popconfirm } from 'antd';
-import { PlusOutlined, TeamOutlined, SearchOutlined, DownOutlined, FileAddOutlined, DeleteOutlined, ShareAltOutlined, CopyOutlined, CompressOutlined, MailOutlined, CheckCircleOutlined, LinkOutlined, CalendarOutlined, ArrowLeftOutlined, UserOutlined, ThunderboltOutlined } from '@ant-design/icons';
+import { PlusOutlined, TeamOutlined, SearchOutlined, DownOutlined, FileAddOutlined, DeleteOutlined, ShareAltOutlined, CopyOutlined, CompressOutlined, MailOutlined, CheckCircleOutlined, LinkOutlined, CalendarOutlined, ArrowLeftOutlined, UserOutlined, ThunderboltOutlined, UploadOutlined } from '@ant-design/icons';
 import { useGetRequirementsQuery } from '../redux/requirementsApi';
 import { useGetPipelineStagesQuery, useSavePipelineStagesMutation } from '../redux/pipelineStagesApi';
-import { useGetAllCandidatesQuery, useReparseWithAiMutation } from '../redux/candidateApi';
+import { useGetAllCandidatesQuery, useReparseWithAiMutation, useUploadResumeMutation } from '../redux/candidateApi';
 import { useRankCandidatesMutation } from '../redux/intelligenceApi';
 import { useGetUserSettingsQuery } from '../redux/settingsApi';
 import {
@@ -14,6 +14,7 @@ import {
 } from '../redux/examApi';
 import { API_BASE_URL } from '../config';
 import ScheduleInterviewDrawer from './ScheduleInterviewDrawer';
+import EditableCandidateField from './EditableCandidateField';
 
 // The canonical empty pipeline — one array per stage.
 const EMPTY_STAGES = { ingested: [], ranked: [], l1: [], l2: [], l3: [] };
@@ -65,6 +66,8 @@ const Pipeline = ({ reqId = null, region = 'global', onBack = null, backLabel = 
   }, [reqId]);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [search, setSearch] = useState('');
+  const resumeFileInputRef = useRef(null);
+  const [uploadResume, { isLoading: isUploadingResume }] = useUploadResumeMutation();
   const [examModalOpen, setExamModalOpen] = useState(false);
   const [examMode, setExamMode] = useState('view'); // 'view' | 'edit'
   const [examDraft, setExamDraft] = useState(SAMPLE_EXAM);
@@ -104,6 +107,19 @@ const Pipeline = ({ reqId = null, region = 'global', onBack = null, backLabel = 
       message.success('Resume parsed with Claude — profile updated');
     } catch (e) {
       message.error(e?.data?.error ?? 'Failed to parse resume with Claude');
+    }
+  };
+
+  // Keep the open profile modal and the pipeline card in sync after an inline field edit.
+  const handleProfileFieldSaved = (updated) => {
+    setProfileCandidate(updated);
+    if (profileStage) {
+      setPipelineData((prev) => ({
+        ...prev,
+        [profileStage]: (prev[profileStage] ?? []).map((c) =>
+          String(c.id) === String(updated.id) ? { ...c, ...updated } : c
+        ),
+      }));
     }
   };
 
@@ -287,6 +303,48 @@ const Pipeline = ({ reqId = null, region = 'global', onBack = null, backLabel = 
       ingested: [...pipelineData.ingested, candidate],
     });
     message.success(`${candidate.name} added to Ingested`);
+  };
+
+  // Upload one or more resumes and add each successfully-parsed candidate straight to Ingested.
+  const handleUploadResumeClick = () => {
+    if (selectedReqId == null) {
+      message.warning('Select a requirement first');
+      return;
+    }
+    resumeFileInputRef.current?.click();
+  };
+
+  const handleResumeFilesSelected = async (e) => {
+    const files = e.target.files ? Array.from(e.target.files) : [];
+    e.target.value = '';
+    if (files.length === 0) return;
+
+    const hide = files.length > 1 ? message.loading(`Uploading ${files.length} resume(s)…`, 0) : null;
+    let successCount = 0;
+    let duplicateCount = 0;
+    let failCount = 0;
+
+    for (const file of files) {
+      try {
+        const candidate = await uploadResume(file).unwrap();
+        successCount++;
+        handleAddToIngested(candidate);
+      } catch (err) {
+        if (err?.status === 409) duplicateCount++;
+        else failCount++;
+      }
+    }
+
+    if (hide) hide();
+    if (files.length === 1) {
+      if (successCount) message.success('Resume uploaded and added to Ingested');
+      else if (duplicateCount) message.warning('Duplicate candidate — already exists in the database');
+      else message.error('Failed to upload resume');
+    } else {
+      if (successCount) message.success(`${successCount} resume(s) uploaded and added to Ingested`);
+      if (duplicateCount) message.warning(`${duplicateCount} duplicate resume(s) skipped`);
+      if (failCount) message.error(`${failCount} resume(s) failed to upload`);
+    }
   };
 
   // --- Online Exam handlers ---
@@ -763,6 +821,25 @@ const Pipeline = ({ reqId = null, region = 'global', onBack = null, backLabel = 
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
       >
+        <input
+          ref={resumeFileInputRef}
+          type="file"
+          accept=".pdf,.docx,.txt"
+          multiple
+          style={{ display: 'none' }}
+          onChange={handleResumeFilesSelected}
+        />
+
+        <Button
+          block
+          icon={<UploadOutlined />}
+          loading={isUploadingResume}
+          onClick={handleUploadResumeClick}
+          style={{ marginBottom: 16, backgroundColor: '#2563eb', color: '#fff', borderColor: '#2563eb' }}
+        >
+          Upload Resume(s)
+        </Button>
+
         <Input
           placeholder="Search by name, email or skill"
           prefix={<SearchOutlined />}
@@ -875,8 +952,12 @@ const Pipeline = ({ reqId = null, region = 'global', onBack = null, backLabel = 
                   <span style={{ marginLeft: 8, color: '#6b7280', fontWeight: 400 }}>— {profileCandidate.title}</span>
                 )}
               </Descriptions.Item>
-              <Descriptions.Item label="Email">{profileCandidate.email || 'N/A'}</Descriptions.Item>
-              <Descriptions.Item label="Phone">{profileCandidate.phone || 'N/A'}</Descriptions.Item>
+              <Descriptions.Item label="Email">
+                <EditableCandidateField candidate={profileCandidate} field="email" placeholder="Email" onSaved={handleProfileFieldSaved} />
+              </Descriptions.Item>
+              <Descriptions.Item label="Phone">
+                <EditableCandidateField candidate={profileCandidate} field="phone" placeholder="Phone" onSaved={handleProfileFieldSaved} />
+              </Descriptions.Item>
               {profileCandidate.location && (
                 <Descriptions.Item label="Location">{profileCandidate.location}</Descriptions.Item>
               )}

@@ -2,6 +2,7 @@ import React from 'react';
 import { Button, Modal, Descriptions, Tag, Tooltip, Space, message } from 'antd';
 import { DownloadOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import { useGetResumeUrlQuery, useReparseWithAiMutation } from '../redux/candidateApi';
+import EditableCandidateField from './EditableCandidateField';
 
 const ResumeDownloadButton = ({ candidateId }) => {
   const { data, isFetching, isError } = useGetResumeUrlQuery(candidateId, { skip: !candidateId });
@@ -89,8 +90,12 @@ const CandidateProfileModal = ({ candidate, open, onClose, onCandidateUpdate }) 
                 </span>
               )}
             </Descriptions.Item>
-            <Descriptions.Item label="Email">{candidate.email || 'N/A'}</Descriptions.Item>
-            <Descriptions.Item label="Phone">{candidate.phone || 'N/A'}</Descriptions.Item>
+            <Descriptions.Item label="Email">
+              <EditableCandidateField candidate={candidate} field="email" placeholder="Email" onSaved={onCandidateUpdate} />
+            </Descriptions.Item>
+            <Descriptions.Item label="Phone">
+              <EditableCandidateField candidate={candidate} field="phone" placeholder="Phone" onSaved={onCandidateUpdate} />
+            </Descriptions.Item>
             {candidate.location && (
               <Descriptions.Item label="Location">{candidate.location}</Descriptions.Item>
             )}

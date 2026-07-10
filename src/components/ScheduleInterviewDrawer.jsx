@@ -9,13 +9,16 @@ import {
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
+import timezone from 'dayjs/plugin/timezone';
 import {
   useGetPanelMembersQuery,
   useCheckConflictsMutation,
   useScheduleInterviewMutation,
 } from '../redux/interviewApi';
+import { useGetUserSettingsQuery } from '../redux/settingsApi';
 
 dayjs.extend(utc);
+dayjs.extend(timezone);
 
 const { Text, Title } = Typography;
 const { TextArea } = Input;
@@ -47,6 +50,14 @@ const ScheduleInterviewDrawer = ({ open, onClose, onScheduled, candidate, requir
   const [checkConflicts] = useCheckConflictsMutation();
   const [scheduleInterview, { isLoading: scheduling }] = useScheduleInterviewMutation();
 
+  const { data: userSettings } = useGetUserSettingsQuery();
+  const userTz = userSettings?.timezone || dayjs.tz.guess();
+
+  // Re-tag a plain dayjs value (from the picker, in browser-local time) as the
+  // same wall-clock time in the user's configured timezone, so what they see
+  // and select always reflects "My Timezone" from Settings, not UTC/browser tz.
+  const toUserTz = (val) => (val ? dayjs.tz(val.format('YYYY-MM-DD HH:mm:ss'), userTz) : val);
+
   const isReschedule = !!candidate?.interviewData;
 
   // Pre-populate form when drawer opens
@@ -59,7 +70,7 @@ const ScheduleInterviewDrawer = ({ open, onClose, onScheduled, candidate, requir
       if (isReschedule && candidate.interviewData) {
         const prev = candidate.interviewData;
         form.setFieldsValue({
-          dateTime: prev.startISO ? dayjs(prev.startISO) : undefined,
+          dateTime: prev.startISO ? dayjs(prev.startISO).tz(userTz) : undefined,
           duration: prev.durationMinutes ?? 60,
           notes: prev.notes ?? '',
         });
@@ -155,6 +166,10 @@ const ScheduleInterviewDrawer = ({ open, onClose, onScheduled, candidate, requir
         startISO: range.startISO,
         endISO: range.endISO,
         notes,
+        // On reschedule, update the same Graph event + DB record instead of creating new ones.
+        meetingId: isReschedule ? candidate?.interviewData?.meetingId : undefined,
+        interviewId: isReschedule ? candidate?.interviewData?.recordId : undefined,
+        existingTeamsLink: isReschedule ? candidate?.interviewData?.teamsLink : undefined,
       }).unwrap();
 
       const duration = form.getFieldValue('duration') ?? 60;
@@ -162,6 +177,8 @@ const ScheduleInterviewDrawer = ({ open, onClose, onScheduled, candidate, requir
       message.success(isReschedule ? 'Interview rescheduled!' : 'Interview scheduled successfully!');
       onScheduled?.({
         teamsLink: res.meeting.teamsLink,
+        meetingId: res.meeting.id,
+        recordId: res.record?.id,
         startISO: range.startISO,
         endISO: range.endISO,
         durationMinutes: duration,
@@ -174,7 +191,7 @@ const ScheduleInterviewDrawer = ({ open, onClose, onScheduled, candidate, requir
     }
   };
 
-  const disabledDate = (current) => current && current < dayjs().startOf('day');
+  const disabledDate = (current) => current && current < dayjs().tz(userTz).startOf('day');
 
   const realConflicts = conflictResult?.conflicts?.filter((c) => !c.accessError) ?? [];
   const uncheckableAttendees = conflictResult?.conflicts?.filter((c) => c.accessError) ?? [];
@@ -245,8 +262,8 @@ const ScheduleInterviewDrawer = ({ open, onClose, onScheduled, candidate, requir
           )}
           <div style={{ background: '#f5f5f5', borderRadius: 8, padding: '12px 16px', textAlign: 'left', fontSize: 13 }}>
             <div><Text strong>Subject:</Text> {scheduledMeeting.subject}</div>
-            <div style={{ marginTop: 6 }}><Text strong>Start:</Text> {dayjs(scheduledMeeting.start).format('MMM D, YYYY h:mm A')} UTC</div>
-            <div><Text strong>End:</Text> {dayjs(scheduledMeeting.end).format('MMM D, YYYY h:mm A')} UTC</div>
+            <div style={{ marginTop: 6 }}><Text strong>Start:</Text> {dayjs(scheduledMeeting.start).tz(userTz).format('MMM D, YYYY h:mm A')} ({userTz})</div>
+            <div><Text strong>End:</Text> {dayjs(scheduledMeeting.end).tz(userTz).format('MMM D, YYYY h:mm A')} ({userTz})</div>
           </div>
           <Button block style={{ marginTop: 16 }} onClick={onClose}>Close</Button>
         </div>
@@ -272,8 +289,9 @@ const ScheduleInterviewDrawer = ({ open, onClose, onScheduled, candidate, requir
             {/* Date & Time */}
             <Form.Item
               name="dateTime"
-              label="Interview Date & Time (UTC)"
+              label={`Interview Date & Time (${userTz})`}
               rules={[{ required: true, message: 'Select date and time' }]}
+              getValueFromEvent={(val) => toUserTz(val)}
             >
               <DatePicker
                 showTime={{ format: 'HH:mm', minuteStep: 15 }}
@@ -482,7 +500,7 @@ const ScheduleInterviewDrawer = ({ open, onClose, onScheduled, candidate, requir
                           {c.events?.map((ev, j) => (
                             <div key={j} style={{ fontSize: 11, color: '#666', marginTop: 2 }}>
                               <ClockCircleOutlined style={{ marginRight: 4 }} />
-                              {ev.subject} ({dayjs(ev.start).format('HH:mm')}–{dayjs(ev.end).format('HH:mm')})
+                              {ev.subject} ({dayjs(ev.start).tz(userTz).format('HH:mm')}–{dayjs(ev.end).tz(userTz).format('HH:mm')})
                             </div>
                           ))}
                         </div>
