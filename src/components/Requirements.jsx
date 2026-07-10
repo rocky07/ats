@@ -535,6 +535,14 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
     });
   };
 
+  // Remove one or more ingested candidates from this requirement's pipeline entirely.
+  const handleRemoveApplicants = (candidateIds) => {
+    if (!viewReq || candidateIds.length === 0) return;
+    const idSet = new Set(candidateIds.map(String));
+    persistApplicants(viewReq.id, (list) => list.filter((c) => !idSet.has(String(c.id))));
+    message.success(`${candidateIds.length} candidate(s) removed`);
+  };
+
   // Rate a candidate (L2/L3 interview rounds only) and persist it.
   const handleRateApplicant = (candidateId, rating) => {
     if (!viewReq) return;
@@ -797,21 +805,6 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
                     />
                   </Tooltip>
                 </Col>
-                <Col xs={6}>
-                  <Popconfirm
-                    title="Delete this requirement?"
-                    description="This cannot be undone."
-                    onConfirm={() => handleDelete(req)}
-                  >
-                    <Tooltip title="Delete requirement">
-                      <Button
-                        danger
-                        icon={<DeleteOutlined />}
-                        style={{ width: '100%', height: 40 }}
-                      />
-                    </Tooltip>
-                  </Popconfirm>
-                </Col>
               </Row>
             </Card>
           </Col>
@@ -857,15 +850,6 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
                   <Button size="small" icon={<SettingOutlined />} onClick={() => openExamConfigModal(req)}>
                     Exam
                   </Button>
-                  <Popconfirm
-                    title="Delete this requirement?"
-                    description="This cannot be undone."
-                    onConfirm={() => handleDelete(req)}
-                  >
-                    <Button size="small" danger icon={<DeleteOutlined />}>
-                      Delete
-                    </Button>
-                  </Popconfirm>
                 </Space>
               ),
             },
@@ -1109,6 +1093,14 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
                         >
                           Rank Selected ({selectedRowKeys.length})
                         </Button>
+                        <Popconfirm
+                          title={`Remove ${selectedRowKeys.length} candidate(s)?`}
+                          onConfirm={() => { handleRemoveApplicants(selectedRowKeys); setSelectedRowKeys([]); }}
+                        >
+                          <Button size="small" danger icon={<DeleteOutlined />}>
+                            Delete Selected ({selectedRowKeys.length})
+                          </Button>
+                        </Popconfirm>
                         <Button size="small" onClick={() => setSelectedRowKeys([])}>Clear</Button>
                       </div>
                     )}
