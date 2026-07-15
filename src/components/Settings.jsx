@@ -449,6 +449,7 @@ const AISettingsTab = () => {
       enableCandidateSummary: userData.aiSettings?.enableCandidateSummary ?? true,
       enableExamGeneration: userData.aiSettings?.enableExamGeneration ?? true,
       enableMarketIntelligence: userData.aiSettings?.enableMarketIntelligence ?? true,
+      enableAutoRankIngested: userData.aiSettings?.enableAutoRankIngested ?? false,
     });
   }, [userData]);
 
@@ -467,6 +468,7 @@ const AISettingsTab = () => {
     { key: 'enableCandidateSummary', label: 'Candidate Summary', desc: 'Auto-summarise candidate profiles' },
     { key: 'enableExamGeneration', label: 'Generate Exam', desc: 'Auto-Generate L1 Exam' },
     { key: 'enableMarketIntelligence', label: 'Live Dice Market Intelligence', desc: 'Auto-fetch live market data (supply, salary, velocity) while creating a requirement' },
+    { key: 'enableAutoRankIngested', label: 'Auto-Rank Ingested Resumes', desc: 'Automatically rank newly ingested resumes with Claude and move them to the Ranked column' },
   ];
 
   return (

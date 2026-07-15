@@ -60,6 +60,7 @@ const Pipeline = ({ reqId = null, region = 'global', onBack = null, backLabel = 
   const [showAllPostings, setShowAllPostings] = useState(false); // default: open postings only
   const [compact, setCompact] = useState(false); // compact card view for long lists
   const isGenerateExamEnabled = userSettings?.aiSettings?.enableExamGeneration ?? true;
+  const isAutoRankIngestedEnabled = userSettings?.aiSettings?.enableAutoRankIngested ?? false;
   // Preselect the requirement when navigated here from "View Pipeline"
   useEffect(() => {
     if (reqId != null) setSelectedReqId(reqId);
@@ -288,14 +289,20 @@ const Pipeline = ({ reqId = null, region = 'global', onBack = null, backLabel = 
   const isInPipeline = (candidateId) =>
     Object.values(pipelineData).some((stage) => stage.some((c) => c.id === candidateId));
 
-  // Add a candidate from the database into the Ingested stage
-  const handleAddToIngested = (candidate) => {
+  // Add a candidate from the database into the Ingested stage — or, when
+  // "Auto-Rank Ingested Resumes" is enabled in AI Settings, rank it with
+  // Claude immediately and drop it straight into the Ranked column.
+  const handleAddToIngested = async (candidate) => {
     if (selectedReqId == null) {
       message.warning('Select a requirement first');
       return;
     }
     if (isInPipeline(candidate.id)) {
       message.info(`${candidate.name} is already in the pipeline`);
+      return;
+    }
+    if (isAutoRankIngestedEnabled) {
+      await rankAndMove([candidate], 'ingested');
       return;
     }
     persistStages({
@@ -328,7 +335,7 @@ const Pipeline = ({ reqId = null, region = 'global', onBack = null, backLabel = 
       try {
         const candidate = await uploadResume(file).unwrap();
         successCount++;
-        handleAddToIngested(candidate);
+        await handleAddToIngested(candidate);
       } catch (err) {
         if (err?.status === 409) duplicateCount++;
         else failCount++;
@@ -336,12 +343,13 @@ const Pipeline = ({ reqId = null, region = 'global', onBack = null, backLabel = 
     }
 
     if (hide) hide();
+    const destination = isAutoRankIngestedEnabled ? 'Ranked' : 'Ingested';
     if (files.length === 1) {
-      if (successCount) message.success('Resume uploaded and added to Ingested');
+      if (successCount) message.success(`Resume uploaded and added to ${destination}`);
       else if (duplicateCount) message.warning('Duplicate candidate — already exists in the database');
       else message.error('Failed to upload resume');
     } else {
-      if (successCount) message.success(`${successCount} resume(s) uploaded and added to Ingested`);
+      if (successCount) message.success(`${successCount} resume(s) uploaded and added to ${destination}`);
       if (duplicateCount) message.warning(`${duplicateCount} duplicate resume(s) skipped`);
       if (failCount) message.error(`${failCount} resume(s) failed to upload`);
     }

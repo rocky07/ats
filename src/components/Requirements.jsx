@@ -145,6 +145,7 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
   const isJdGenerationEnabled = userSettings?.aiSettings?.enableJdGeneration ?? true;
   const isGenerateExamEnabled = userSettings?.aiSettings?.enableExamGeneration ?? true;
   const isMarketIntelligenceEnabled = userSettings?.aiSettings?.enableMarketIntelligence ?? true;
+  const isAutoRankIngestedEnabled = userSettings?.aiSettings?.enableAutoRankIngested ?? false;
   // 3. Destructure the mutation trigger and its execution states
   const [addRequirement, { isLoading: isSubmitting }] = useAddRequirementMutation();
   const [updateRequirement] = useUpdateRequirementMutation();
@@ -551,8 +552,10 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
     );
   };
 
-  // Add a candidate from the database into the Ingested stage
-  const handleAddFromDb = (candidateId) => {
+  // Add a candidate from the database into the Ingested stage — or, when
+  // "Auto-Rank Ingested Resumes" is enabled in AI Settings, rank it with
+  // Claude immediately and drop it straight into the Ranked column.
+  const handleAddFromDb = async (candidateId) => {
     const cand = candidateList.find((c) => String(c.id) === String(candidateId));
     if (!cand || !viewReq) return;
     const list = applicantsByReq[viewReq.id] ?? [];
@@ -560,30 +563,33 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
       message.info(`${cand.name} is already in this pipeline`);
       return;
     }
-    persistApplicants(viewReq.id, (l) => [
-      ...l,
-      { id: cand.id, name: cand.name, email: cand.email, skills: cand.skills, stage: 'ingested' },
-    ]);
-    message.success(`${cand.name} added to pipeline (Ingested)`);
+    const applicant = { id: cand.id, name: cand.name, email: cand.email, skills: cand.skills, stage: 'ingested' };
+    if (isAutoRankIngestedEnabled) {
+      await handleRankCandidates([applicant]);
+    } else {
+      persistApplicants(viewReq.id, (l) => [...l, applicant]);
+      message.success(`${cand.name} added to pipeline (Ingested)`);
+    }
     setAddPick(null);
   };
 
-  // Add a parsed candidate into the current requirement's Ingested stage.
-  const addCandidateToPipeline = (reqId, candidate) => {
-    persistApplicants(reqId, (list) =>
-      list.some((c) => c.id === candidate.id)
-        ? list
-        : [
-            ...list,
-            {
-              id: candidate.id,
-              name: candidate.name,
-              email: candidate.email,
-              skills: candidate.skills,
-              stage: 'ingested',
-            },
-          ],
-    );
+  // Add a parsed candidate into the current requirement's Ingested stage — or,
+  // when auto-rank is enabled, rank it and move it straight to Ranked.
+  const addCandidateToPipeline = async (reqId, candidate) => {
+    const list = applicantsByReq[reqId] ?? [];
+    if (list.some((c) => c.id === candidate.id)) return;
+    const applicant = {
+      id: candidate.id,
+      name: candidate.name,
+      email: candidate.email,
+      skills: candidate.skills,
+      stage: 'ingested',
+    };
+    if (isAutoRankIngestedEnabled && String(reqId) === String(viewReq?.id)) {
+      await handleRankCandidates([applicant]);
+    } else {
+      persistApplicants(reqId, (l) => [...l, applicant]);
+    }
   };
 
   // Handle a dropped/uploaded resume — parses it on the backend, persists the
@@ -593,13 +599,13 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
     const reqId = viewReq.id;
     try {
       const candidate = await uploadResume(file).unwrap();
-      addCandidateToPipeline(reqId, candidate);
-      message.success(`${candidate.name} parsed and added to Ingested`);
+      await addCandidateToPipeline(reqId, candidate);
+      message.success(`${candidate.name} parsed and added to ${isAutoRankIngestedEnabled ? 'Ranked' : 'Ingested'}`);
     } catch (err) {
       // 409 = duplicate candidate already in the database; still surface them.
       if (err?.status === 409 && err.data?.candidate) {
-        addCandidateToPipeline(reqId, err.data.candidate);
-        message.info(`${err.data.candidate.name} already exists — added from database`);
+        await addCandidateToPipeline(reqId, err.data.candidate);
+        message.info(`${err.data.candidate.name} already exists — added ${isAutoRankIngestedEnabled ? 'and ranked' : 'from database'}`);
       } else {
         console.error('Resume upload failed:', err);
         message.error(`Failed to parse ${file.name}`);
