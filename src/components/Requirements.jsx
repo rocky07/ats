@@ -27,6 +27,18 @@ const STAGE_KEYS = ['ingested', 'ranked', 'l1', 'l2', 'l3'];
 const stagesToApplicants = (stages = {}) =>
   STAGE_KEYS.flatMap((stage) => (stages[stage] ?? []).map((c) => ({ ...c, stage })));
 
+// Strip round-specific state that shouldn't carry over when a candidate changes
+// stage: interview rating/schedule always reset, and — when heading back to
+// Ingested — exam results reset too, so re-entering candidates start fresh.
+const resetStageFields = (candidate, targetStage) => {
+  const { rating, interviewData, ...rest } = candidate;
+  if (targetStage === 'ingested') {
+    const { examScore, examInvited, examId, ...clean } = rest;
+    return clean;
+  }
+  return rest;
+};
+
 // Rebuild the stages object from a flat applicant list.
 const applicantsToStages = (applicants = []) => {
   const stages = STAGE_KEYS.reduce((acc, key) => ({ ...acc, [key]: [] }), {});
@@ -418,12 +430,11 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
       if (cand) { handleRankCandidates([cand]); return; }
     }
     persistApplicants(viewReq.id, (list) =>
-      list.map((c) => {
-        if (String(c.id) !== String(candidateId)) return c;
-        // Moving to a different stage resets any interview rating from the previous round.
-        const { rating, ...rest } = c;
-        return { ...rest, stage: newStage };
-      })
+      list.map((c) =>
+        String(c.id) === String(candidateId)
+          ? { ...resetStageFields(c, newStage), stage: newStage }
+          : c
+      )
     );
   };
 
@@ -434,8 +445,9 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
     try {
       const { results } = await rankCandidatesApi({ candidates, requirement: viewReq }).unwrap();
       const scored = candidates.map((c) => {
+        const clean = resetStageFields(c, 'ranked');
         const r = results.find((res) => String(res.id) === String(c.id));
-        return r ? { ...c, score: r.score, rankSummary: r.summary } : c;
+        return r ? { ...clean, score: r.score, rankSummary: r.summary } : clean;
       });
       const scoredIds = new Set(scored.map((c) => String(c.id)));
       persistApplicants(viewReq.id, (list) => {

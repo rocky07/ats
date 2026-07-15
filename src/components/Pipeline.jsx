@@ -19,6 +19,18 @@ import EditableCandidateField from './EditableCandidateField';
 // The canonical empty pipeline — one array per stage.
 const EMPTY_STAGES = { ingested: [], ranked: [], l1: [], l2: [], l3: [] };
 
+// Strip round-specific state that shouldn't carry over when a candidate changes
+// stage: interview rating/schedule always reset, and — when heading back to
+// Ingested — exam results reset too, so re-entering candidates start fresh.
+const resetStageFields = (candidate, targetStage) => {
+  const { rating, interviewData, ...rest } = candidate;
+  if (targetStage === 'ingested') {
+    const { examScore, examInvited, examId, ...clean } = rest;
+    return clean;
+  }
+  return rest;
+};
+
 const { Title, Text } = Typography;
 
 const OPTION_KEYS = ['A', 'B', 'C', 'D'];
@@ -214,10 +226,11 @@ const Pipeline = ({ reqId = null, region = 'global', onBack = null, backLabel = 
     try {
       const { results } = await rankCandidatesApi({ candidates, requirement }).unwrap();
 
-      // Merge scores back into candidates
+      // Merge scores back into candidates, resetting any prior round's state (rating/interview).
       const scored = candidates.map((c) => {
+        const clean = resetStageFields(c, 'ranked');
         const r = results.find((res) => String(res.id) === String(c.id));
-        return r ? { ...c, score: r.score, rankSummary: r.summary } : c;
+        return r ? { ...clean, score: r.score, rankSummary: r.summary } : clean;
       });
 
       // Remove from source stage, add (with scores) to ranked
@@ -265,8 +278,7 @@ const Pipeline = ({ reqId = null, region = 'global', onBack = null, backLabel = 
       return;
     }
 
-    // Moving to a different stage resets any interview rating from the previous round.
-    const { rating, ...movedCandidate } = candidate;
+    const movedCandidate = resetStageFields(candidate, targetStage);
 
     const updated = { ...pipelineData };
     updated[sourceStage] = updated[sourceStage].filter((c) => c.id !== candidate.id);
