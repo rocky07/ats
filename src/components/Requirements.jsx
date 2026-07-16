@@ -27,13 +27,33 @@ const STAGE_KEYS = ['ingested', 'ranked', 'l1', 'l2', 'l3'];
 const stagesToApplicants = (stages = {}) =>
   STAGE_KEYS.flatMap((stage) => (stages[stage] ?? []).map((c) => ({ ...c, stage })));
 
+const PROCTOR_LABELS = {
+  no_face: 'Face not visible',
+  multiple_faces: 'Multiple faces detected',
+  face_mismatch: "Face didn't match verification photo",
+  tab_switch: 'Switched away from exam tab',
+  window_blur: 'Exam window lost focus',
+  camera_unavailable: 'Camera unavailable',
+};
+
+const summarizeProctoringFlags = (flags = []) => {
+  if (!flags.length) return null;
+  const counts = flags.reduce((acc, f) => {
+    acc[f.reason] = (acc[f.reason] ?? 0) + 1;
+    return acc;
+  }, {});
+  return Object.entries(counts)
+    .map(([reason, n]) => `${PROCTOR_LABELS[reason] ?? reason}${n > 1 ? ` (×${n})` : ''}`)
+    .join('\n');
+};
+
 // Strip round-specific state that shouldn't carry over when a candidate changes
 // stage: interview rating/schedule always reset, and — when heading back to
 // Ingested — exam results reset too, so re-entering candidates start fresh.
 const resetStageFields = (candidate, targetStage) => {
   const { rating, interviewData, ...rest } = candidate;
   if (targetStage === 'ingested') {
-    const { examScore, examInvited, examId, ...clean } = rest;
+    const { examScore, examInvited, examId, proctoringFlags, ...clean } = rest;
     return clean;
   }
   return rest;
@@ -411,7 +431,10 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
           const sub = await fetchSubmission({ examId: c.examId, candidateId: c.id }).unwrap();
           if (sub?.score != null) {
             const idx = nextList.findIndex((x) => String(x.id) === String(c.id));
-            if (idx !== -1) { nextList[idx] = { ...nextList[idx], examScore: sub.score }; updated = true; }
+            if (idx !== -1) {
+              nextList[idx] = { ...nextList[idx], examScore: sub.score, proctoringFlags: sub.proctoringFlags ?? [] };
+              updated = true;
+            }
           }
         } catch { /* not submitted yet */ }
       }
@@ -992,9 +1015,18 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
               if (stageKey === 'l1') {
                 if (c.examScore != null) {
                   return (
-                    <Tag color={c.examScore >= 70 ? 'success' : c.examScore >= 40 ? 'warning' : 'error'}>
-                      Exam: {c.examScore}%
-                    </Tag>
+                    <Space size={4}>
+                      <Tag color={c.examScore >= 70 ? 'success' : c.examScore >= 40 ? 'warning' : 'error'}>
+                        Exam: {c.examScore}%
+                      </Tag>
+                      {c.proctoringFlags?.length > 0 && (
+                        <Tooltip title={<div style={{ whiteSpace: 'pre-line' }}>{summarizeProctoringFlags(c.proctoringFlags)}</div>}>
+                          <Tag icon={<WarningOutlined />} color="error" style={{ cursor: 'help' }}>
+                            {c.proctoringFlags.length} violation{c.proctoringFlags.length > 1 ? 's' : ''}
+                          </Tag>
+                        </Tooltip>
+                      )}
+                    </Space>
                   );
                 }
                 return (

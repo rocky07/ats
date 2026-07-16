@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
-import { useGetExamPublicQuery, useSubmitExamMutation, useVerifyIdentityMutation } from '../redux/examApi';
-import { Button, Card, Radio, Progress, Typography, Space, Result, Spin, Tag, Upload, Alert } from 'antd';
+import { useGetExamPublicQuery, useSubmitExamMutation, useVerifyIdentityMutation, useMonitorExamMutation } from '../redux/examApi';
+import { Button, Card, Radio, Progress, Typography, Space, Result, Spin, Tag, Upload, Alert, Checkbox } from 'antd';
 import { ClockCircleOutlined, CheckCircleOutlined, TrophyOutlined, CameraOutlined, IdcardOutlined, ReloadOutlined } from '@ant-design/icons';
 
 const { Title, Text } = Typography;
@@ -17,10 +17,12 @@ const ExamPage = () => {
   const { data: exam, isLoading, error } = useGetExamPublicQuery(examId);
   const [submitExam, { isLoading: isSubmitting }] = useSubmitExamMutation();
   const [verifyIdentity, { isLoading: isVerifying }] = useVerifyIdentityMutation();
+  const [monitorExam] = useMonitorExamMutation();
 
   const timeLimitMinutes = exam?.timeLimitMinutes ?? DEFAULT_TIME_LIMIT_MINUTES;
   const requireIdVerification = exam?.requireIdVerification ?? true;
 
+  const [proctoringConsent, setProctoringConsent] = useState(false);
   const [answers, setAnswers] = useState({});
   const [secondsLeft, setSecondsLeft] = useState(DEFAULT_TIME_LIMIT_MINUTES * 60);
   const [started, setStarted] = useState(false);
@@ -137,6 +139,98 @@ const ExamPage = () => {
     if (exam && !requireIdVerification) setVerifyStep('verified');
   }, [exam, requireIdVerification]);
 
+  // ── In-exam proctoring ──
+  // Every 60s, grab a fresh webcam frame and compare it against the verified
+  // selfie via Rekognition to confirm the same person is still alone at the
+  // screen. Also watches for the candidate switching tabs / losing window focus.
+  const [proctorWarning, setProctorWarning] = useState(null);
+  const [proctoringFlags, setProctoringFlags] = useState([]);
+  const monitorVideoRef = useRef(null);
+  const monitorStreamRef = useRef(null);
+  const monitorIntervalRef = useRef(null);
+  const proctorWarningTimeoutRef = useRef(null);
+
+  const flagProctorEvent = (reason, message) => {
+    setProctoringFlags((prev) => [...prev, { at: new Date().toISOString(), reason }]);
+    setProctorWarning(message);
+    clearTimeout(proctorWarningTimeoutRef.current);
+    proctorWarningTimeoutRef.current = setTimeout(() => setProctorWarning(null), 8000);
+  };
+
+  const captureMonitorFrame = () => {
+    const video = monitorVideoRef.current;
+    if (!video || !video.videoWidth) return null;
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext('2d').drawImage(video, 0, 0);
+    return canvas.toDataURL('image/jpeg', 0.8);
+  };
+
+  const runPresenceCheck = async () => {
+    const frame = captureMonitorFrame();
+    if (!frame || !selfieImage) return;
+    try {
+      const res = await monitorExam({
+        examId,
+        candidateId,
+        referenceImageBase64: selfieImage,
+        currentImageBase64: await downscaleImage(frame, 800),
+      }).unwrap();
+      if (!res.ok) {
+        const messages = {
+          no_face: "We can't see your face — please make sure you're in view of the camera.",
+          multiple_faces: 'More than one face was detected. Only the candidate should be in view during the exam.',
+          face_mismatch: "The person in view doesn't match your verification photo.",
+        };
+        flagProctorEvent(res.reason, messages[res.reason] ?? 'Proctoring check failed. Please stay visible to the camera.');
+      }
+    } catch {
+      // Network/Rekognition hiccups shouldn't interrupt the exam; just skip this check.
+    }
+  };
+
+  // Start/stop the background monitoring camera + interval alongside the exam itself.
+  useEffect(() => {
+    if (!started || submitted || !requireIdVerification || !selfieImage) return undefined;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+        if (cancelled) { stream.getTracks().forEach((t) => t.stop()); return; }
+        monitorStreamRef.current = stream;
+        if (monitorVideoRef.current) monitorVideoRef.current.srcObject = stream;
+      } catch {
+        flagProctorEvent('camera_unavailable', 'Proctoring camera is unavailable — please keep your camera enabled during the exam.');
+      }
+    })();
+
+    monitorIntervalRef.current = setInterval(runPresenceCheck, 60000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(monitorIntervalRef.current);
+      monitorStreamRef.current?.getTracks().forEach((t) => t.stop());
+      monitorStreamRef.current = null;
+    };
+  }, [started, submitted, requireIdVerification, selfieImage]);
+
+  // Instant warning when the candidate switches tabs or the window loses focus.
+  useEffect(() => {
+    if (!started || submitted) return undefined;
+    const handleVisibility = () => {
+      if (document.hidden) flagProctorEvent('tab_switch', 'You switched away from the exam tab. Please stay on this page.');
+    };
+    const handleBlur = () => flagProctorEvent('window_blur', 'The exam window lost focus. Please return to the exam.');
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('blur', handleBlur);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('blur', handleBlur);
+    };
+  }, [started, submitted]);
+
   // Countdown
   useEffect(() => {
     if (!started || submitted) return;
@@ -165,6 +259,7 @@ const ExamPage = () => {
         candidateName,
         answers,
         timeTaken,
+        proctoringFlags,
       }).unwrap();
       setResult(res);
       setSubmitted(true);
@@ -361,10 +456,37 @@ const ExamPage = () => {
               </div>
             ))}
           </div>
+
+          {requireIdVerification && (
+            <Alert
+              type="warning"
+              showIcon
+              style={{ marginBottom: 20, textAlign: 'left' }}
+              message="This exam is proctored"
+              description={
+                <div style={{ fontSize: 13 }}>
+                  <div style={{ marginBottom: 8 }}>While the assessment is in progress, we will:</div>
+                  <ul style={{ margin: '0 0 10px', paddingLeft: 18 }}>
+                    <li>Keep your camera on and capture your face to confirm you're the person who verified identity</li>
+                    <li>You will be flagged if no face, more than one face, or a mismatched face is detected</li>
+                    <li>You will be flagged if you switch tabs or the exam window loses focus</li>
+                  </ul>
+                  <Checkbox
+                    checked={proctoringConsent}
+                    onChange={(e) => setProctoringConsent(e.target.checked)}
+                  >
+                    I understand and consent to this proctoring for the duration of the exam.
+                  </Checkbox>
+                </div>
+              }
+            />
+          )}
+
           <Button
             type="primary"
             size="large"
             block
+            disabled={requireIdVerification && !proctoringConsent}
             onClick={() => setStarted(true)}
             style={{ backgroundColor: '#2563eb', height: 48, fontSize: 16 }}
           >
@@ -380,6 +502,9 @@ const ExamPage = () => {
 
   return (
     <div style={{ minHeight: '100vh', background: '#f0f4ff', padding: '24px 16px' }}>
+      {/* Hidden background camera feed used for periodic proctoring checks */}
+      <video ref={monitorVideoRef} autoPlay playsInline muted style={{ position: 'fixed', width: 1, height: 1, opacity: 0, pointerEvents: 'none' }} />
+
       {/* Sticky header */}
       <div style={{
         position: 'sticky', top: 0, zIndex: 100,
@@ -400,6 +525,12 @@ const ExamPage = () => {
           </Tag>
         </Space>
       </div>
+
+      {proctorWarning && (
+        <div style={{ maxWidth: 760, margin: '0 auto 20px' }}>
+          <Alert type="warning" showIcon message={proctorWarning} closable onClose={() => setProctorWarning(null)} />
+        </div>
+      )}
 
       {/* Questions */}
       <div style={{ maxWidth: 760, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 20 }}>

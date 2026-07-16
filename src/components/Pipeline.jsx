@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Button, Card, Typography, Select, Drawer, Input, Empty, message, Dropdown, Modal, Radio, Space, Tooltip, Segmented, Tag, Descriptions, Rate, Popconfirm } from 'antd';
-import { PlusOutlined, TeamOutlined, SearchOutlined, DownOutlined, FileAddOutlined, DeleteOutlined, ShareAltOutlined, CopyOutlined, CompressOutlined, MailOutlined, CheckCircleOutlined, LinkOutlined, CalendarOutlined, ArrowLeftOutlined, UserOutlined, ThunderboltOutlined, UploadOutlined } from '@ant-design/icons';
+import { PlusOutlined, TeamOutlined, SearchOutlined, DownOutlined, FileAddOutlined, DeleteOutlined, ShareAltOutlined, CopyOutlined, CompressOutlined, MailOutlined, CheckCircleOutlined, LinkOutlined, CalendarOutlined, ArrowLeftOutlined, UserOutlined, ThunderboltOutlined, UploadOutlined, WarningOutlined } from '@ant-design/icons';
 import { useGetRequirementsQuery } from '../redux/requirementsApi';
 import { useGetPipelineStagesQuery, useSavePipelineStagesMutation } from '../redux/pipelineStagesApi';
 import { useGetAllCandidatesQuery, useReparseWithAiMutation, useUploadResumeMutation } from '../redux/candidateApi';
@@ -22,10 +22,30 @@ const EMPTY_STAGES = { ingested: [], ranked: [], l1: [], l2: [], l3: [] };
 // Strip round-specific state that shouldn't carry over when a candidate changes
 // stage: interview rating/schedule always reset, and — when heading back to
 // Ingested — exam results reset too, so re-entering candidates start fresh.
+const PROCTOR_LABELS = {
+  no_face: 'Face not visible',
+  multiple_faces: 'Multiple faces detected',
+  face_mismatch: "Face didn't match verification photo",
+  tab_switch: 'Switched away from exam tab',
+  window_blur: 'Exam window lost focus',
+  camera_unavailable: 'Camera unavailable',
+};
+
+const summarizeProctoringFlags = (flags = []) => {
+  if (!flags.length) return null;
+  const counts = flags.reduce((acc, f) => {
+    acc[f.reason] = (acc[f.reason] ?? 0) + 1;
+    return acc;
+  }, {});
+  return Object.entries(counts)
+    .map(([reason, n]) => `${PROCTOR_LABELS[reason] ?? reason}${n > 1 ? ` (×${n})` : ''}`)
+    .join('\n');
+};
+
 const resetStageFields = (candidate, targetStage) => {
   const { rating, interviewData, ...rest } = candidate;
   if (targetStage === 'ingested') {
-    const { examScore, examInvited, examId, ...clean } = rest;
+    const { examScore, examInvited, examId, proctoringFlags, ...clean } = rest;
     return clean;
   }
   return rest;
@@ -148,7 +168,10 @@ const Pipeline = ({ reqId = null, region = 'global', onBack = null, backLabel = 
           const sub = await fetchSubmission({ examId: c.examId, candidateId: c.id }).unwrap();
           if (sub?.score != null) {
             const idx = nextL1.findIndex((x) => String(x.id) === String(c.id));
-            if (idx !== -1) { nextL1[idx] = { ...nextL1[idx], examScore: sub.score }; updated = true; }
+            if (idx !== -1) {
+              nextL1[idx] = { ...nextL1[idx], examScore: sub.score, proctoringFlags: sub.proctoringFlags ?? [] };
+              updated = true;
+            }
           }
         } catch { /* not submitted yet */ }
       }
@@ -627,6 +650,13 @@ const Pipeline = ({ reqId = null, region = 'global', onBack = null, backLabel = 
                         {stage.key === 'l1' && candidate.examScore != null && (
                           <Tag color="green" style={{ fontSize: 10, margin: 0 }}>Score: {candidate.examScore}%</Tag>
                         )}
+                        {stage.key === 'l1' && candidate.proctoringFlags?.length > 0 && (
+                          <Tooltip title={<div style={{ whiteSpace: 'pre-line' }}>{summarizeProctoringFlags(candidate.proctoringFlags)}</div>}>
+                            <Tag color="red" icon={<WarningOutlined />} style={{ fontSize: 10, margin: 0, cursor: 'help' }}>
+                              {candidate.proctoringFlags.length}
+                            </Tag>
+                          </Tooltip>
+                        )}
                         {stage.key === 'l1' && candidate.examInvited && candidate.examScore == null && (
                           <Tag color="orange" style={{ fontSize: 10, margin: 0 }}>Exam Sent</Tag>
                         )}
@@ -739,10 +769,17 @@ const Pipeline = ({ reqId = null, region = 'global', onBack = null, backLabel = 
 
                       {/* Exam score */}
                       {candidate.examScore != null && (
-                        <div style={{ marginTop: 4 }}>
+                        <div style={{ marginTop: 4, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
                           <Tag icon={<CheckCircleOutlined />} color="success" style={{ fontSize: 10, margin: 0 }}>
                             Exam Score: {candidate.examScore}%
                           </Tag>
+                          {candidate.proctoringFlags?.length > 0 && (
+                            <Tooltip title={<div style={{ whiteSpace: 'pre-line' }}>{summarizeProctoringFlags(candidate.proctoringFlags)}</div>}>
+                              <Tag icon={<WarningOutlined />} color="error" style={{ fontSize: 10, margin: 0, cursor: 'help' }}>
+                                {candidate.proctoringFlags.length} violation{candidate.proctoringFlags.length > 1 ? 's' : ''}
+                              </Tag>
+                            </Tooltip>
+                          )}
                         </div>
                       )}
 
