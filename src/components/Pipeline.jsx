@@ -565,8 +565,8 @@ const Pipeline = ({ reqId = null, region = 'global', onBack = null, backLabel = 
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16, minHeight: compact ? 'auto' : 600, alignItems: 'start' }}>
         {[
-          { key: 'ingested', label: 'Ingested (Claude Parsed)' },
-          { key: 'ranked', label: 'Ranked (Claude Scored)' },
+          { key: 'ingested', label: 'All Candidates' },
+          { key: 'ranked', label: 'Ranked' },
           { key: 'l1', label: 'L1 (Exam)' },
           { key: 'l2', label: 'L2 (Recruiter)' },
           { key: 'l3', label: 'L3 (Final)' }

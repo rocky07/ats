@@ -116,7 +116,7 @@ const { TextArea } = Input;
 
 
 // Pipeline stage display metadata
-const STAGE_LABELS = { ingested: 'Ingested', ranked: 'Ranked', l1: 'L1 (Exam)', l2: 'L2 (Recruiter)', l3: 'L3 (Final)' };
+const STAGE_LABELS = { ingested: 'All Candidates', ranked: 'Ranked', l1: 'L1 (Exam)', l2: 'L2 (Recruiter)', l3: 'L3 (Final)' };
 const STAGE_COLORS = { ingested: 'blue', ranked: 'gold', l1: 'purple', l2: 'cyan', l3: 'green' };
 
 // Mini per-stage progress bars showing candidate distribution across the pipeline for a card.
@@ -393,6 +393,7 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
   const [scheduleCandidate, setScheduleCandidate] = useState(null);
   const [detailsTab, setDetailsTab] = useState('ingested');
   const [selectedRowKeys, setSelectedRowKeys] = useState([]);
+  const [bulkMoveTarget, setBulkMoveTarget] = useState(null);
 
   const applicants = viewReq ? (applicantsByReq[viewReq.id] ?? []) : [];
 
@@ -434,6 +435,23 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
         String(c.id) === String(candidateId)
           ? { ...resetStageFields(c, newStage), stage: newStage }
           : c
+      )
+    );
+  };
+
+  // Move multiple selected candidates to a different stage at once; moving to
+  // ranked routes through the same AI ranking flow as the single-candidate case.
+  const handleBulkMoveStage = (candidateIds, newStage) => {
+    if (!viewReq || !newStage || candidateIds.length === 0) return;
+    if (newStage === 'ranked') {
+      const toRank = applicants.filter((c) => candidateIds.some((id) => String(id) === String(c.id)));
+      handleRankCandidates(toRank);
+      return;
+    }
+    const idSet = new Set(candidateIds.map(String));
+    persistApplicants(viewReq.id, (list) =>
+      list.map((c) =>
+        idSet.has(String(c.id)) ? { ...resetStageFields(c, newStage), stage: newStage } : c
       )
     );
   };
@@ -516,6 +534,44 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
       message.success(`Exam invite sent to ${candidate.name}!`);
     } catch {
       message.error('Failed to send invite. Check EMAIL_USER/EMAIL_PASS env vars.');
+    }
+  };
+
+  // Send L1 exam invites to multiple selected candidates at once.
+  const [isBulkSendingInvites, setIsBulkSendingInvites] = useState(false);
+  const handleBulkSendExamInvite = async (candidates) => {
+    if (!currentExam) { message.warning('No exam generated for this requirement yet.'); return; }
+    if (candidates.length === 0) return;
+    setIsBulkSendingInvites(true);
+    const sentIds = [];
+    let failCount = 0;
+    try {
+      for (const candidate of candidates) {
+        try {
+          await sendExamInviteApi({
+            candidateId: candidate.id,
+            candidateName: candidate.name,
+            candidateEmail: candidate.email,
+            examId: currentExam.requirementId,
+            jobTitle: viewReq?.title ?? 'Job',
+          }).unwrap();
+          sentIds.push(String(candidate.id));
+        } catch {
+          failCount++;
+        }
+      }
+      if (sentIds.length) {
+        const sentIdSet = new Set(sentIds);
+        persistApplicants(viewReq.id, (list) =>
+          list.map((c) =>
+            sentIdSet.has(String(c.id)) ? { ...c, examInvited: true, examId: currentExam.requirementId } : c
+          )
+        );
+        message.success(`Exam invite sent to ${sentIds.length} candidate(s)`);
+      }
+      if (failCount) message.error(`Failed to send invite to ${failCount} candidate(s)`);
+    } finally {
+      setIsBulkSendingInvites(false);
     }
   };
 
@@ -1041,15 +1097,17 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
           });
 
           const tableForStage = (stageKey) => {
-            const stageApplicants = applicants.filter((c) => c.stage === stageKey);
+            const stageApplicants = applicants
+              .filter((c) => c.stage === stageKey)
+              .sort((a, b) => (b.score ?? -1) - (a.score ?? -1) || (b.rating ?? 0) - (a.rating ?? 0));
             const isIngested = stageKey === 'ingested';
             const isL1 = stageKey === 'l1';
-            const selectionProps = isIngested ? {
+            const selectionProps = {
               rowSelection: {
                 selectedRowKeys,
                 onChange: setSelectedRowKeys,
               },
-            } : {};
+            };
 
             return (
               <>
@@ -1096,20 +1154,46 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
                   <Empty description={`No candidates in ${STAGE_LABELS[stageKey]}`} image={Empty.PRESENTED_IMAGE_SIMPLE} style={{ margin: '24px 0' }} />
                 ) : (
                   <>
-                    {isIngested && selectedRowKeys.length > 0 && (
-                      <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    {selectedRowKeys.length > 0 && (
+                      <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                         <Text type="secondary" style={{ fontSize: 12 }}>{selectedRowKeys.length} selected</Text>
+                        {isL1 && (
+                          <Tooltip title={!currentExam ? 'Generate an exam first' : 'Send the L1 exam link to all selected candidates'}>
+                            <Button
+                              size="small"
+                              type="primary"
+                              icon={<MailOutlined />}
+                              loading={isBulkSendingInvites}
+                              disabled={!currentExam}
+                              style={{ backgroundColor: '#2563eb', borderColor: '#2563eb' }}
+                              onClick={() => {
+                                const toInvite = stageApplicants.filter((c) => selectedRowKeys.includes(c.id));
+                                handleBulkSendExamInvite(toInvite);
+                                setSelectedRowKeys([]);
+                              }}
+                            >
+                              Send Exam ({selectedRowKeys.length})
+                            </Button>
+                          </Tooltip>
+                        )}
+                        <Select
+                          size="small"
+                          placeholder="Move to…"
+                          style={{ width: 150 }}
+                          value={bulkMoveTarget}
+                          onChange={setBulkMoveTarget}
+                          options={STAGE_KEYS.filter((s) => s !== stageKey).map((s) => ({ value: s, label: STAGE_LABELS[s] }))}
+                        />
                         <Button
                           size="small"
-                          type="primary"
-                          loading={isRanking}
-                          style={{ backgroundColor: '#7c3aed', borderColor: '#7c3aed' }}
+                          disabled={!bulkMoveTarget}
                           onClick={() => {
-                            const toRank = stageApplicants.filter((c) => selectedRowKeys.includes(c.id));
-                            handleRankCandidates(toRank);
+                            handleBulkMoveStage(selectedRowKeys, bulkMoveTarget);
+                            setSelectedRowKeys([]);
+                            setBulkMoveTarget(null);
                           }}
                         >
-                          Rank Selected ({selectedRowKeys.length})
+                          Move
                         </Button>
                         <Popconfirm
                           title={`Remove ${selectedRowKeys.length} candidate(s)?`}
@@ -1119,7 +1203,7 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
                             Delete Selected ({selectedRowKeys.length})
                           </Button>
                         </Popconfirm>
-                        <Button size="small" onClick={() => setSelectedRowKeys([])}>Clear</Button>
+                        <Button size="small" onClick={() => { setSelectedRowKeys([]); setBulkMoveTarget(null); }}>Clear</Button>
                       </div>
                     )}
                     <Table
@@ -1183,7 +1267,7 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
               {/* Pipeline stage tabs */}
               <Tabs
                 activeKey={detailsTab}
-                onChange={(tab) => { setDetailsTab(tab); setSelectedRowKeys([]); }}
+                onChange={(tab) => { setDetailsTab(tab); setSelectedRowKeys([]); setBulkMoveTarget(null); }}
                 size="small"
                 items={STAGE_KEYS.map((s) => ({
                   key: s,
