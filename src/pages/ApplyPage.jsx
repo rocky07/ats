@@ -100,8 +100,34 @@ const ApplyPage = () => {
     );
   }
 
+  const EMPLOYMENT_TYPE_MAP = {
+    'Full-time': 'FULL_TIME',
+    W2: 'CONTRACTOR',
+    C2C: 'CONTRACTOR',
+    Contract: 'CONTRACTOR',
+    'Contract-1099': 'CONTRACTOR',
+  };
+
+  // schema.org JobPosting — lets Google understand & index this listing for Google for Jobs.
+  const jobPostingLd = {
+    '@context': 'https://schema.org/',
+    '@type': 'JobPosting',
+    title: job.title,
+    description: job.description || job.title,
+    datePosted: job.openDate,
+    hiringOrganization: { '@type': 'Organization', name: 'Bourntec' },
+    employmentType: EMPLOYMENT_TYPE_MAP[job.jobType] ?? undefined,
+    ...(job.workMode === 'Remote'
+      ? { jobLocationType: 'TELECOMMUTE', applicantLocationRequirements: { '@type': 'Country', name: job.location || 'US' } }
+      : job.location
+        ? { jobLocation: { '@type': 'Place', address: { '@type': 'PostalAddress', addressLocality: job.location } } }
+        : {}),
+  };
+
   return (
     <div style={{ minHeight: '100vh', background: '#f5f5f5', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '40px 16px' }}>
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jobPostingLd) }} />
+
       {/* Header */}
       <div style={{ maxWidth: 640, width: '100%', marginBottom: 24, textAlign: 'center' }}>
         <Space>

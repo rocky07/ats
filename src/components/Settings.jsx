@@ -302,6 +302,77 @@ const AdminBoardCard = ({ boardKey, config = {}, onSave }) => {
   );
 };
 
+// Google Search (Indexing API) — org-wide only, no per-recruiter opt-in: every
+// open job either gets indexed/removed automatically, or it doesn't. Admin-only.
+const GoogleJobsCard = ({ config = {}, onSave }) => {
+  const [form] = Form.useForm();
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    form.setFieldsValue({
+      enabled: config.enabled ?? false,
+      autoPost: config.autoPost ?? false,
+      serviceAccountKeyJson: config.serviceAccountKeyJson ?? '',
+    });
+  }, [config]);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await onSave('google', form.getFieldsValue());
+      message.success('Google job indexing settings saved');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Card
+      style={{ borderRadius: 10, border: `1.5px solid ${config.enabled ? '#4285F455' : '#e8e8e8'}`, marginBottom: 16 }}
+      bodyStyle={{ padding: '16px 20px' }}
+    >
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
+        <Space align="start">
+          <span style={{ fontSize: 20 }}>🔍</span>
+          <div>
+            <Text strong style={{ fontSize: 15, color: '#4285F4' }}>Google Search (Indexing API)</Text>
+            <br />
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              Notifies Google to index open jobs (Google for Jobs) and to remove them once closed
+            </Text>
+          </div>
+        </Space>
+        <Space>
+          <Badge status={config.enabled ? 'success' : 'default'} text={<Text type={config.enabled ? 'success' : 'secondary'} style={{ fontSize: 12 }}>{config.enabled ? 'Active' : 'Disabled'}</Text>} />
+          <Form form={form}>
+            <Form.Item name="enabled" valuePropName="checked" noStyle><Switch checkedChildren="ON" unCheckedChildren="OFF" /></Form.Item>
+          </Form>
+        </Space>
+      </div>
+
+      <Form form={form} layout="vertical">
+        <Form.Item
+          name="serviceAccountKeyJson"
+          label="Service Account Key (JSON)"
+          style={{ marginBottom: 12 }}
+          extra="Paste the full JSON key for a Google Cloud service account with the Indexing API enabled, added as an Owner in Search Console for this domain."
+        >
+          <Input.TextArea rows={4} placeholder='{ "type": "service_account", "client_email": "...", "private_key": "..." }' />
+        </Form.Item>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Space>
+            <Text type="secondary" style={{ fontSize: 13 }}>Auto-index on create / remove on close:</Text>
+            <Form.Item name="autoPost" valuePropName="checked" noStyle><Switch size="small" /></Form.Item>
+          </Space>
+          <Button size="small" type="primary" icon={<SaveOutlined />} loading={saving} onClick={handleSave} style={{ backgroundColor: '#4285F4', borderColor: '#4285F4' }}>
+            Save
+          </Button>
+        </div>
+      </Form>
+    </Card>
+  );
+};
+
 // Recruiter view: enable/disable only, credentials locked
 const RecruiterBoardToggle = ({ boardKey, sysConfig = {}, userEnabled, onChange }) => {
   const meta = BOARD_META[boardKey];
@@ -402,6 +473,11 @@ const JobBoardsTab = ({ isAdmin }) => {
               onSave={handleAdminSaveBoard}
             />
           ))}
+
+          <Divider orientation="left" style={{ marginBottom: 16 }}>
+            <Space><GlobalOutlined /><Text strong>Search Engines</Text></Space>
+          </Divider>
+          <GoogleJobsCard config={jobBoards.google} onSave={handleAdminSaveBoard} />
         </>
       ) : (
         <>
@@ -426,6 +502,16 @@ const JobBoardsTab = ({ isAdmin }) => {
           >
             Save Preferences
           </Button>
+
+          {jobBoards.google?.enabled && (
+            <Alert
+              type="info"
+              showIcon
+              style={{ marginTop: 16 }}
+              message="Google Search indexing is active"
+              description="Open jobs are automatically submitted to Google for Jobs and removed when closed — no action needed from you."
+            />
+          )}
         </>
       )}
     </div>
