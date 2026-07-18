@@ -614,92 +614,6 @@ const ExamSettingsTab = () => {
   );
 };
 
-// ─── System Settings Tab (admin only) ────────────────────────────────────────
-const SystemSettingsTab = () => {
-  const { data: sysData, isLoading } = useGetSystemSettingsQuery();
-  const [updateSystem, { isLoading: saving }] = useUpdateSystemSettingsMutation();
-  const [form] = Form.useForm();
-
-  useEffect(() => {
-    if (sysData) form.setFieldsValue({
-      companyName: sysData.companyName,
-      defaultTimezone: sysData.defaultTimezone,
-      anthropicApiKey: sysData.anthropicApiKey,
-      mseTenantId: sysData.msGraph?.tenantId,
-      mseClientId: sysData.msGraph?.clientId,
-      mseClientSecret: sysData.msGraph?.clientSecret,
-      mseOrganizerEmail: sysData.msGraph?.organizerEmail,
-      cognitoUserPoolId: sysData.cognito?.userPoolId,
-      cognitoClientId: sysData.cognito?.clientId,
-      cognitoRegion: sysData.cognito?.region,
-    });
-  }, [sysData]);
-
-  const onSave = async () => {
-    const v = form.getFieldsValue();
-    await updateSystem({
-      companyName: v.companyName,
-      defaultTimezone: v.defaultTimezone,
-      anthropicApiKey: v.anthropicApiKey,
-      msGraph: { tenantId: v.mseTenantId, clientId: v.mseClientId, clientSecret: v.mseClientSecret, organizerEmail: v.mseOrganizerEmail },
-      cognito: { userPoolId: v.cognitoUserPoolId, clientId: v.cognitoClientId, region: v.cognitoRegion },
-    }).unwrap();
-    message.success('System settings saved');
-  };
-
-  if (isLoading) return <Spin tip="Loading system settings…" />;
-
-  return (
-    <div style={{ maxWidth: 700 }}>
-      <Alert type="warning" showIcon message="Admin Only" description="These settings affect all users and contain sensitive credentials. Handle with care." style={{ marginBottom: 20 }} />
-      <Form form={form} layout="vertical">
-        <Card title="General" style={{ borderRadius: 10, marginBottom: 16 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-            <Form.Item name="companyName" label="Company Name"><Input /></Form.Item>
-            <Form.Item name="defaultTimezone" label="Default Timezone">
-              <Select options={[
-                { value: 'America/New_York', label: 'EST (New York)' },
-                { value: 'America/Los_Angeles', label: 'PST (Los Angeles)' },
-                { value: 'UTC', label: 'UTC' },
-                { value: 'Asia/Kolkata', label: 'IST (Kolkata)' },
-                { value: 'Europe/London', label: 'GMT (London)' },
-              ]} />
-            </Form.Item>
-          </div>
-        </Card>
-
-        <Card title={<Space><RobotOutlined />Anthropic / AI</Space>} style={{ borderRadius: 10, marginBottom: 16 }}>
-          <Form.Item name="anthropicApiKey" label="Anthropic API Key">
-            <Input.Password placeholder="sk-ant-api03-…" />
-          </Form.Item>
-        </Card>
-
-        <Card title={<Space><GlobalOutlined />Microsoft Graph (Teams Interviews)</Space>} style={{ borderRadius: 10, marginBottom: 16 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-            <Form.Item name="mseTenantId" label="Tenant ID"><Input placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" /></Form.Item>
-            <Form.Item name="mseClientId" label="Client ID"><Input /></Form.Item>
-            <Form.Item name="mseClientSecret" label="Client Secret"><Input.Password /></Form.Item>
-            <Form.Item name="mseOrganizerEmail" label="Organizer Email"><Input placeholder="ats@company.com" /></Form.Item>
-          </div>
-        </Card>
-
-        <Card title={<Space><LockOutlined />AWS Cognito</Space>} style={{ borderRadius: 10, marginBottom: 16 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-            <Form.Item name="cognitoUserPoolId" label="User Pool ID"><Input placeholder="us-east-1_xxxxxxxxx" /></Form.Item>
-            <Form.Item name="cognitoClientId" label="App Client ID"><Input /></Form.Item>
-            <Form.Item name="cognitoRegion" label="Region"><Input placeholder="us-east-1" /></Form.Item>
-          </div>
-          <Alert type="info" message="Restart the backend server after changing Cognito settings." style={{ marginTop: 8 }} />
-        </Card>
-
-        <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={onSave} style={{ backgroundColor: '#2563eb' }}>
-          Save System Settings
-        </Button>
-      </Form>
-    </div>
-  );
-};
-
 // ─── User Preferences Tab ─────────────────────────────────────────────────────
 const UserSettingsTab = ({ onSettingsChange }) => {
   const { data: userData, isLoading } = useGetUserSettingsQuery();
@@ -772,7 +686,7 @@ const UserSettingsTab = ({ onSettingsChange }) => {
           <Text type="secondary" style={{ fontSize: 12 }}>The region selected automatically each time you log in</Text>
         </Card>
 
-        <Card title={<Space><BellOutlined />Email Notifications</Space>} style={{ borderRadius: 10, marginBottom: 16 }}>
+        {/* <Card title={<Space><BellOutlined />Email Notifications</Space>} style={{ borderRadius: 10, marginBottom: 16 }}>
           {notifItems.map(({ key, label, desc }) => (
             <div key={key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid #f5f5f5' }}>
               <div>
@@ -783,7 +697,7 @@ const UserSettingsTab = ({ onSettingsChange }) => {
               <Form.Item name={key} valuePropName="checked" noStyle><Switch /></Form.Item>
             </div>
           ))}
-        </Card>
+        </Card> */}
 
         <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={onSave} style={{ backgroundColor: '#2563eb' }}>
           Save My Preferences
@@ -824,13 +738,6 @@ const Settings = ({ onSettingsChange }) => {
       key: 'exams',
       label: <Space><FileTextOutlined /><span>Exams</span><Tag color="red" style={{ fontSize: 10, marginLeft: 0 }}>Admin</Tag></Space>,
       children: <ExamSettingsTab />,
-    }] : []),
-
-    // System Settings (admin only)
-    ...(isAdmin ? [{
-      key: 'systemSettings',
-      label: <Space><LockOutlined /><span>System Settings</span><Tag color="red" style={{ fontSize: 10, marginLeft: 0 }}>Admin</Tag></Space>,
-      children: <SystemSettingsTab />,
     }] : []),
   ];
 
