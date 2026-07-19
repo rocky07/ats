@@ -310,6 +310,7 @@ const App = () => {
   const [region, setRegion] = useState('global');
   const [pipelineReqId, setPipelineReqId] = useState(null);
   const [returnToReqId, setReturnToReqId] = useState(null); // req to re-open in Requirements on back
+  const [cameFromRequirements, setCameFromRequirements] = useState(false); // show Pipeline's Back button
   const [drawerOpen, setDrawerOpen] = useState(false);
   const { data: userSettings } = useGetUserSettingsQuery(undefined, { skip: !isAuthenticated });
 
@@ -330,6 +331,7 @@ const App = () => {
 
   const handleViewPipeline = (reqId) => {
     setPipelineReqId(reqId);
+    setCameFromRequirements(true);
     setSelectedMenu('4');
   };
 
@@ -337,6 +339,7 @@ const App = () => {
   const handleViewInPipeline = (reqId) => {
     setReturnToReqId(reqId);
     setPipelineReqId(reqId);
+    setCameFromRequirements(true);
     setSelectedMenu('4');
   };
 
@@ -344,6 +347,7 @@ const App = () => {
   const handleBackToRequirements = () => {
     setSelectedMenu('3');
     setPipelineReqId(null);
+    setCameFromRequirements(false);
     // returnToReqId stays set so Requirements can open the right modal
   };
 
@@ -414,7 +418,10 @@ const App = () => {
           selectedKeys={[selectedMenu]}
           mode="inline"
           items={sidebarItems}
-          onClick={(e) => setSelectedMenu(e.key)}
+          onClick={(e) => {
+            setSelectedMenu(e.key);
+            if (e.key !== '4') setCameFromRequirements(false);
+          }}
           style={{ marginTop: 16 }}
         />
       </Sider>
@@ -496,8 +503,8 @@ const App = () => {
             <Pipeline
               reqId={pipelineReqId}
               region={region}
-              onBack={returnToReqId ? handleBackToRequirements : null}
-              backLabel="Back to Requirement"
+              onBack={cameFromRequirements ? handleBackToRequirements : null}
+              backLabel={returnToReqId ? 'Back to Requirement' : 'Back to Requirements'}
             />
           )}
           {selectedMenu === '5' && <Vendors />}

@@ -118,7 +118,7 @@ import {
   CalendarOutlined,
   SwapOutlined,
   StarFilled,
-  ArrowRightOutlined,
+  ArrowLeftOutlined,
   LinkOutlined,
   DeleteOutlined,
   MoreOutlined,
@@ -791,6 +791,8 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
 
   return (
     <>
+      {!viewReq && (
+      <>
       {/* Top Search Controls Frame */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, gap: 12, flexWrap: 'wrap' }}>
         <Space size={12}>
@@ -953,37 +955,24 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
           ]}
         />
       )}
+      </>
+      )}
 
-      {/* --- View Details Modal: job details + pipeline management --- */}
-      <Modal
-        title={viewReq ? <Title level={4} style={{ margin: 0 }}>{viewReq.title}</Title> : null}
-        open={!!viewReq}
-        onCancel={() => setViewReq(null)}
-        footer={
-          <Space>
-            <Button onClick={() => setViewReq(null)}>Close</Button>
-            <Button icon={<ShareAltOutlined />} onClick={() => openShareModal(viewReq)}>
-              Share
-            </Button>
-            <Button
-              type="primary"
-              icon={<ArrowRightOutlined />}
-              style={{ backgroundColor: '#2563eb' }}
-              onClick={() => {
-                const req = viewReq;
-                setViewReq(null);
-                onViewInPipeline?.(req.id);
-              }}
-            >
-              View in Pipeline
-            </Button>
-          </Space>
-        }
-        width={960}
-        destroyOnClose
-        styles={{ body: { maxHeight: '78vh', overflowY: 'auto', padding: '16px 24px' } }}
-      >
-        {viewReq && (() => {
+      {/* --- View Details Page: job details + pipeline management --- */}
+      {viewReq && (
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
+            <Space>
+              <Button icon={<ArrowLeftOutlined />} onClick={() => setViewReq(null)}>Back</Button>
+              <Title level={4} style={{ margin: 0 }}>{viewReq.title}</Title>
+            </Space>
+            <Space>
+              <Button icon={<ShareAltOutlined />} onClick={() => openShareModal(viewReq)}>
+                Share
+              </Button>
+            </Space>
+          </div>
+          {(() => {
           const stageCounts = STAGE_KEYS.reduce((acc, s) => {
             acc[s] = applicants.filter((c) => c.stage === s).length;
             return acc;
@@ -1361,7 +1350,8 @@ const Requirements = ({ onViewPipeline, onViewInPipeline, openReqId, onOpenReqId
             </>
           );
         })()}
-      </Modal>
+        </div>
+      )}
 
       {/* Schedule Interview Drawer — triggered from View Details candidate table */}
       <ScheduleInterviewDrawer
